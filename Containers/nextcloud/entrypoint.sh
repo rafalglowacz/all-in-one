@@ -19,24 +19,6 @@ run_upgrade_if_needed_due_to_app_update() {
     fi
 }
 
-echo "Configuring Redis as session handler..."
-cat << REDIS_CONF > /usr/local/etc/php/conf.d/redis-session.ini
-session.save_handler = redis
-session.save_path = "tcp://${REDIS_HOST}:${REDIS_HOST_PORT:=6379}?auth=${REDIS_HOST_PASSWORD}"
-redis.session.locking_enabled = 1
-redis.session.lock_retries = -1
-# redis.session.lock_wait_time is specified in microseconds.
-# Wait 10ms before retrying the lock rather than the default 2ms.
-redis.session.lock_wait_time = 10000
-REDIS_CONF
-
-echo "Setting php max children..."
-MEMORY=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
-PHP_MAX_CHILDREN=$((MEMORY/50))
-if [ -n "$PHP_MAX_CHILDREN" ]; then
-    sed -i "s/^pm.max_children =.*/pm.max_children = $PHP_MAX_CHILDREN/" /usr/local/etc/php-fpm.d/www.conf
-fi
-
 # Check permissions in ncdata
 touch "$NEXTCLOUD_DATA_DIR/this-is-a-test-file" &>/dev/null
 if ! [ -f "$NEXTCLOUD_DATA_DIR/this-is-a-test-file" ]; then
@@ -62,9 +44,9 @@ if [ -f /var/www/html/version.php ]; then
 else
     installed_version="0.0.0.0"
 fi
-if [ -f "/usr/src/nextcloud/version.php" ]; then
+if [ -f "$SOURCE_LOCATION/version.php" ]; then
     # shellcheck disable=SC2016
-    image_version="$(php -r 'require "/usr/src/nextcloud/version.php"; echo implode(".", $OC_Version);')"
+    image_version="$(php -r "require '$SOURCE_LOCATION/version.php'; echo implode('.', \$OC_Version);")"
 else
     image_version="$installed_version"
 fi
@@ -113,6 +95,8 @@ if ! [ -f "$NEXTCLOUD_DATA_DIR/skip.update" ]; then
         fi
 
         if [ "$installed_version" != "0.0.0.0" ] && [ "$((IMAGE_MAJOR - INSTALLED_MAJOR))" -gt 1 ]; then
+# Do not skip major versions placeholder # Do not remove or change this line!
+# Do not skip major versions start # Do not remove or change this line!
             set -ex
             NEXT_MAJOR="$((INSTALLED_MAJOR + 1))"
             curl -fsSL -o nextcloud.tar.bz2 "https://download.nextcloud.com/server/releases/latest-${NEXT_MAJOR}.tar.bz2"
@@ -129,17 +113,18 @@ if ! [ -f "$NEXTCLOUD_DATA_DIR/skip.update" ]; then
             mkdir -p /usr/src/tmp/nextcloud/data
             mkdir -p /usr/src/tmp/nextcloud/custom_apps
             chmod +x /usr/src/tmp/nextcloud/occ
-            cp -r /usr/src/nextcloud/config/* /usr/src/tmp/nextcloud/config/
+            cp -r "$SOURCE_LOCATION"/config/* /usr/src/tmp/nextcloud/config/
             mkdir -p /usr/src/tmp/nextcloud/apps/nextcloud-aio
-            cp -r /usr/src/nextcloud/apps/nextcloud-aio/* /usr/src/tmp/nextcloud/apps/nextcloud-aio/
-            mv /usr/src/nextcloud /usr/src/temp-nextcloud
-            mv /usr/src/tmp/nextcloud /usr/src/nextcloud
+            cp -r "$SOURCE_LOCATION"/apps/nextcloud-aio/* /usr/src/tmp/nextcloud/apps/nextcloud-aio/
+            mv "$SOURCE_LOCATION" /usr/src/temp-nextcloud
+            mv /usr/src/tmp/nextcloud "$SOURCE_LOCATION"
             rm -r /usr/src/tmp
             rm -r /usr/src/temp-nextcloud
             # shellcheck disable=SC2016
-            image_version="$(php -r 'require "/usr/src/nextcloud/version.php"; echo implode(".", $OC_Version);')"
+            image_version="$(php -r "require $SOURCE_LOCATION/version.php; echo implode('.', \$OC_Version);")"
             IMAGE_MAJOR="${image_version%%.*}"
             set +ex
+# Do not skip major versions end # Do not remove or change this line!
         fi
 
         if [ "$installed_version" != "0.0.0.0" ]; then
@@ -193,15 +178,15 @@ if ! [ -f "$NEXTCLOUD_DATA_DIR/skip.update" ]; then
         fi
 
         echo "Initializing nextcloud $image_version ..."
-        rsync -rlD --delete --exclude-from=/upgrade.exclude /usr/src/nextcloud/ /var/www/html/
+        rsync -rlD --delete --exclude-from=/upgrade.exclude "$SOURCE_LOCATION/" /var/www/html/
 
         for dir in config data custom_apps themes; do
             if [ ! -d "/var/www/html/$dir" ] || directory_empty "/var/www/html/$dir"; then
-                rsync -rlD --include "/$dir/" --exclude '/*' /usr/src/nextcloud/ /var/www/html/
+                rsync -rlD --include "/$dir/" --exclude '/*' "$SOURCE_LOCATION/" /var/www/html/
             fi
         done
-        rsync -rlD --delete --include '/config/' --exclude '/*' --exclude '/config/CAN_INSTALL' --exclude '/config/config.sample.php' --exclude '/config/config.php' /usr/src/nextcloud/ /var/www/html/
-        rsync -rlD --include '/version.php' --exclude '/*' /usr/src/nextcloud/ /var/www/html/
+        rsync -rlD --delete --include '/config/' --exclude '/*' --exclude '/config/CAN_INSTALL' --exclude '/config/config.sample.php' --exclude '/config/config.php' "$SOURCE_LOCATION/" /var/www/html/
+        rsync -rlD --include '/version.php' --exclude '/*' "$SOURCE_LOCATION/" /var/www/html/
         echo "Initializing finished"
 
         #install
@@ -262,10 +247,17 @@ DATADIR_PERMISSION_CONF
             # unset admin password
             unset ADMIN_PASSWORD
 
+# AIO update to latest start # Do not remove or change this line!
             if [ "$INSTALL_LATEST_MAJOR" = yes ]; then
-                php /var/www/html/occ config:system:set updater.release.channel --value=beta
                 php /var/www/html/occ config:system:set updatedirectory --value="/nc-updater"
-                php /var/www/html/updater/updater.phar --no-interaction
+                INSTALLED_AT="$(php /var/www/html/occ config:app:get core installedat)"
+                if [ -n "${INSTALLED_AT}" ]; then
+                    # Set the installdat to 00 which will allow to skip staging and install the next major directly
+                    # shellcheck disable=SC2001
+                    INSTALLED_AT="$(echo "${INSTALLED_AT}" | sed "s|[0-9][0-9]$|00|")"
+                    php /var/www/html/occ config:app:set core installedat --value="${INSTALLED_AT}" 
+                fi
+                php /var/www/html/updater/updater.phar --no-interaction --no-backup
                 if ! php /var/www/html/occ -V || php /var/www/html/occ status | grep maintenance | grep -q 'true'; then
                     echo "Installation of Nextcloud failed!"
                     touch "$NEXTCLOUD_DATA_DIR/install.failed"
@@ -276,7 +268,7 @@ DATADIR_PERMISSION_CONF
                 INSTALLED_MAJOR="${installed_version%%.*}"
                 IMAGE_MAJOR="${image_version%%.*}"
                 if ! [ "$INSTALLED_MAJOR" -gt "$IMAGE_MAJOR" ]; then
-                    php /var/www/html/updater/updater.phar --no-interaction
+                    php /var/www/html/updater/updater.phar --no-interaction --no-backup
                     if ! php /var/www/html/occ -V || php /var/www/html/occ status | grep maintenance | grep -q 'true'; then
                         echo "Installation of Nextcloud failed!"
                         touch "$NEXTCLOUD_DATA_DIR/install.failed"
@@ -287,13 +279,13 @@ DATADIR_PERMISSION_CONF
                 fi
                 php /var/www/html/occ app:disable updatenotification
                 rm -rf /var/www/html/apps/updatenotification
-                php /var/www/html/occ config:system:set updater.release.channel --value=stable
                 php /var/www/html/occ app:enable nextcloud-aio --force
                 php /var/www/html/occ db:add-missing-indices
                 php /var/www/html/occ db:add-missing-columns
                 php /var/www/html/occ db:add-missing-primary-keys
                 yes | php /var/www/html/occ db:convert-filecache-bigint
             fi
+# AIO update to latest end # Do not remove or change this line!
 
             # Apply log settings
             echo "Applying default settings..."
@@ -324,6 +316,8 @@ DATADIR_PERMISSION_CONF
 
             # Apply other settings
             echo "Applying other settings..."
+            # Add missing indices after new installation because they seem to be missing on new installation
+            php /var/www/html/occ db:add-missing-indices
             php /var/www/html/occ config:system:set upgrade.disable-web --type=bool --value=true
             php /var/www/html/occ config:system:set mail_smtpmode --value="smtp"
             php /var/www/html/occ config:system:set trashbin_retention_obligation --value="auto, 30"
@@ -364,6 +358,9 @@ DATADIR_PERMISSION_CONF
                 bash /notify.sh "Nextcloud update to $image_version failed!" "Please restore from backup!"
                 exit 1
             fi
+
+            # shellcheck disable=SC2016
+            installed_version="$(php -r 'require "/var/www/html/version.php"; echo implode(".", $OC_Version);')"
 
             rm "$NEXTCLOUD_DATA_DIR/update.failed"
             bash /notify.sh "Nextcloud update to $image_version successful!" "Feel free to inspect the Nextcloud container logs for more info."
@@ -462,12 +459,18 @@ if [ -f "$NEXTCLOUD_DATA_DIR/fingerprint.update" ]; then
     rm "$NEXTCLOUD_DATA_DIR/fingerprint.update"
 fi
 
+# AIO one-click settings start # Do not remove or change this line!
 # Apply one-click-instance settings
 echo "Applying one-click-instance settings..."
 php /var/www/html/occ config:system:set one-click-instance --value=true --type=bool
 php /var/www/html/occ config:system:set one-click-instance.user-limit --value=100 --type=int
 php /var/www/html/occ config:system:set one-click-instance.link --value="https://nextcloud.com/all-in-one/"
+# AIO one-click settings end # Do not remove or change this line!
 php /var/www/html/occ app:enable support
+if [ -n "$SUBSCRIPTION_KEY" ] && [ -z "$(php /var/www/html/occ config:app:get support potential_subscription_key)" ]; then
+    php /var/www/html/occ config:app:set support potential_subscription_key --value="$SUBSCRIPTION_KEY"
+    php /var/www/html/occ config:app:delete support last_check
+fi
 
 # Adjusting log files to be stored on a volume
 echo "Adjusting log files..."
@@ -475,17 +478,33 @@ php /var/www/html/occ config:system:set upgrade.cli-upgrade-link --value="https:
 php /var/www/html/occ config:system:set logfile --value="/var/www/html/data/nextcloud.log"
 php /var/www/html/occ config:app:set admin_audit logfile --value="/var/www/html/data/audit.log"
 php /var/www/html/occ config:system:set updatedirectory --value="/nc-updater"
+if [ -n "$SERVERINFO_TOKEN" ] && [ -z "$(php /var/www/html/occ config:app:get serverinfo token)" ]; then
+    php /var/www/html/occ config:app:set serverinfo token --value="$SERVERINFO_TOKEN"
+fi
+# Set maintenance window so that no warning is shown in the admin overview
+if [ -z "$(php /var/www/html/occ config:system:get maintenance_window_start)" ]; then
+    php /var/www/html/occ config:system:set maintenance_window_start --type=int --value=100
+fi
 
 # Apply network settings
 echo "Applying network settings..."
+php /var/www/html/occ config:system:set allow_local_remote_servers --type=bool --value=true
 php /var/www/html/occ config:system:set davstorage.request_timeout --value="$PHP_MAX_TIME" --type=int
 php /var/www/html/occ config:system:set trusted_domains 1 --value="$NC_DOMAIN"
 php /var/www/html/occ config:system:set overwrite.cli.url --value="https://$NC_DOMAIN/"
 php /var/www/html/occ config:system:set htaccess.RewriteBase --value="/"
 php /var/www/html/occ maintenance:update:htaccess
 
-# Apply dbpersistent setting in order to fix too many db connections
-php /var/www/html/occ config:system:set dbpersistent --value=true --type=bool
+# Revert dbpersistent setting to check if it fixes too many db connections
+php /var/www/html/occ config:system:set dbpersistent --value=false --type=bool
+
+if [ "$DISABLE_BRUTEFORCE_PROTECTION" = yes ]; then
+    php /var/www/html/occ config:system:set auth.bruteforce.protection.enabled --type=bool --value=false
+    php /var/www/html/occ config:system:set ratelimit.protection.enabled --type=bool --value=false
+else
+    php /var/www/html/occ config:system:set auth.bruteforce.protection.enabled --type=bool --value=true
+    php /var/www/html/occ config:system:set ratelimit.protection.enabled --type=bool --value=true
+fi
 
 # Disallow creating local external storages when nothing was mounted
 if [ -z "$NEXTCLOUD_MOUNT" ]; then
@@ -494,10 +513,18 @@ else
     php /var/www/html/occ config:system:set files_external_allow_create_new_local --type=bool --value=true
 fi
 
+# AIO app start # Do not remove or change this line!
 # AIO app
-if [ "$(php /var/www/html/occ config:app:get nextcloud-aio enabled)" != "yes" ]; then
-    php /var/www/html/occ app:enable nextcloud-aio
+if [ "$THIS_IS_AIO" = "true" ]; then
+    if [ "$(php /var/www/html/occ config:app:get nextcloud-aio enabled)" != "yes" ]; then
+        php /var/www/html/occ app:enable nextcloud-aio
+    fi
+else
+    if [ "$(php /var/www/html/occ config:app:get nextcloud-aio enabled)" != "no" ]; then
+        php /var/www/html/occ app:disable nextcloud-aio
+    fi
 fi
+# AIO app end # Do not remove or change this line!
 
 # Notify push
 if ! [ -d "/var/www/html/custom_apps/notify_push" ]; then
@@ -507,12 +534,32 @@ elif [ "$(php /var/www/html/occ config:app:get notify_push enabled)" != "yes" ];
 elif [ "$SKIP_UPDATE" != 1 ]; then
     php /var/www/html/occ app:update notify_push
 fi
+chmod 775 -R /var/www/html/custom_apps/notify_push/bin/
 php /var/www/html/occ config:system:set trusted_proxies 0 --value="127.0.0.1"
 php /var/www/html/occ config:system:set trusted_proxies 1 --value="::1"
+if [ -n "$ADDITIONAL_TRUSTED_PROXY" ]; then
+    php /var/www/html/occ config:system:set trusted_proxies 2 --value="$ADDITIONAL_TRUSTED_PROXY"
+fi
+
+# Get ipv4-address of Nextcloud 
+IPv4_ADDRESS="$(dig nextcloud-aio-nextcloud A +short +search | head -1)" 
+# Bring it in CIDR notation 
+# shellcheck disable=SC2001
+IPv4_ADDRESS="$(echo "$IPv4_ADDRESS" | sed 's|[0-9]\+$|1/32|')" 
+php /var/www/html/occ config:system:set trusted_proxies 10 --value="$IPv4_ADDRESS"
+
+if [ -n "$ADDITIONAL_TRUSTED_DOMAIN" ]; then
+    php /var/www/html/occ config:system:set trusted_domains 2 --value="$ADDITIONAL_TRUSTED_DOMAIN"
+fi
 php /var/www/html/occ config:app:set notify_push base_endpoint --value="https://$NC_DOMAIN/push"
 
 # Collabora
 if [ "$COLLABORA_ENABLED" = 'yes' ]; then
+    set -x
+    if echo "$COLLABORA_HOST" | grep -q "nextcloud-.*-collabora"; then
+        COLLABORA_HOST="$NC_DOMAIN"
+    fi
+    set +x
     if ! [ -d "/var/www/html/custom_apps/richdocuments" ]; then
         php /var/www/html/occ app:install richdocuments
     elif [ "$(php /var/www/html/occ config:app:get richdocuments enabled)" != "yes" ]; then
@@ -520,12 +567,10 @@ if [ "$COLLABORA_ENABLED" = 'yes' ]; then
     elif [ "$SKIP_UPDATE" != 1 ]; then
         php /var/www/html/occ app:update richdocuments
     fi
-    php /var/www/html/occ config:app:set richdocuments wopi_url --value="https://$NC_DOMAIN/"
-    # Fix https://github.com/nextcloud/all-in-one/issues/188:
-    php /var/www/html/occ config:system:set allow_local_remote_servers --type=bool --value=true
+    php /var/www/html/occ config:app:set richdocuments wopi_url --value="https://$COLLABORA_HOST/"
     # Make collabora more save
-    COLLABORA_IPv4_ADDRESS="$(dig "$NC_DOMAIN" A +short | grep '^[0-9.]\+$' | sort | head -n1)"
-    COLLABORA_IPv6_ADDRESS="$(dig "$NC_DOMAIN" AAAA +short | grep '^[0-9a-f:]\+$' | sort | head -n1)"
+    COLLABORA_IPv4_ADDRESS="$(dig "$COLLABORA_HOST" A +short +search | grep '^[0-9.]\+$' | sort | head -n1)"
+    COLLABORA_IPv6_ADDRESS="$(dig "$COLLABORA_HOST" AAAA +short +search | grep '^[0-9a-f:]\+$' | sort | head -n1)"
     COLLABORA_ALLOW_LIST="$(php /var/www/html/occ config:app:get richdocuments wopi_allowlist)"
     if [ -n "$COLLABORA_IPv4_ADDRESS" ]; then
         if ! echo "$COLLABORA_ALLOW_LIST" | grep -q "$COLLABORA_IPv4_ADDRESS"; then
@@ -536,7 +581,7 @@ if [ "$COLLABORA_ENABLED" = 'yes' ]; then
             fi
         fi
     else
-        echo "Warning: No ipv4-address found for $NC_DOMAIN."
+        echo "Warning: No ipv4-address found for $COLLABORA_HOST."
     fi
     if [ -n "$COLLABORA_IPv6_ADDRESS" ]; then
         if ! echo "$COLLABORA_ALLOW_LIST" | grep -q "$COLLABORA_IPv6_ADDRESS"; then
@@ -547,12 +592,17 @@ if [ "$COLLABORA_ENABLED" = 'yes' ]; then
             fi
         fi
     else
-        echo "No ipv6-address found for $NC_DOMAIN."
+        echo "No ipv6-address found for $COLLABORA_HOST."
     fi
     if [ -n "$COLLABORA_ALLOW_LIST" ]; then
         PRIVATE_IP_RANGES='127.0.0.1/8,192.168.0.0/16,172.16.0.0/12,10.0.0.0/8,fd00::/8,::1'
         if ! echo "$COLLABORA_ALLOW_LIST" | grep -q "$PRIVATE_IP_RANGES"; then
             COLLABORA_ALLOW_LIST+=",$PRIVATE_IP_RANGES"
+        fi
+        if [ -n "$ADDITIONAL_TRUSTED_PROXY" ]; then
+            if ! echo "$COLLABORA_ALLOW_LIST" | grep -q "$ADDITIONAL_TRUSTED_PROXY"; then
+                COLLABORA_ALLOW_LIST+=",$ADDITIONAL_TRUSTED_PROXY"
+            fi
         fi
         php /var/www/html/occ config:app:set richdocuments wopi_allowlist --value="$COLLABORA_ALLOW_LIST"
     else
@@ -581,7 +631,6 @@ if [ "$ONLYOFFICE_ENABLED" = 'yes' ]; then
     php /var/www/html/occ config:app:set onlyoffice jwt_secret --value="$ONLYOFFICE_SECRET"
     php /var/www/html/occ config:system:set onlyoffice jwt_header --value="AuthorizationJwt"
     php /var/www/html/occ config:app:set onlyoffice DocumentServerUrl --value="https://$NC_DOMAIN/onlyoffice"
-    php /var/www/html/occ config:system:set allow_local_remote_servers --type=bool --value=true
 else
     if [ "$REMOVE_DISABLED_APPS" = yes ] && [ -d "/var/www/html/custom_apps/onlyoffice" ] && [ -n "$ONLYOFFICE_SECRET" ] && [ "$(php /var/www/html/occ config:system:get onlyoffice jwt_secret)" = "$ONLYOFFICE_SECRET" ]; then
         php /var/www/html/occ app:remove onlyoffice
@@ -590,6 +639,15 @@ fi
 
 # Talk
 if [ "$TALK_ENABLED" = 'yes' ]; then
+    set -x
+    if [ -z "$TALK_HOST" ] || echo "$TALK_HOST" | grep -q "nextcloud-.*-talk"; then
+        TALK_HOST="$NC_DOMAIN"
+        HPB_PATH="/standalone-signaling/"
+    fi
+    if [ -z "$TURN_DOMAIN" ]; then
+        TURN_DOMAIN="$TALK_HOST"
+    fi
+    set +x
     if ! [ -d "/var/www/html/custom_apps/spreed" ]; then
         php /var/www/html/occ app:install spreed
     elif [ "$(php /var/www/html/occ config:app:get spreed enabled)" != "yes" ]; then
@@ -599,15 +657,16 @@ if [ "$TALK_ENABLED" = 'yes' ]; then
     fi
     # Based on https://github.com/nextcloud/spreed/issues/960#issuecomment-416993435
     if [ -z "$(php /var/www/html/occ talk:turn:list --output="plain")" ]; then
-        php /var/www/html/occ talk:turn:add turn "$NC_DOMAIN:$TALK_PORT" "udp,tcp" --secret="$TURN_SECRET"
+        # shellcheck disable=SC2153
+        php /var/www/html/occ talk:turn:add turn "$TURN_DOMAIN:$TALK_PORT" "udp,tcp" --secret="$TURN_SECRET"
     fi
     STUN_SERVER="$(php /var/www/html/occ talk:stun:list --output="plain")"
     if [ -z "$STUN_SERVER" ] || echo "$STUN_SERVER" | grep -oP '[a-zA-Z.:0-9]+' | grep -q "^stun.nextcloud.com:443$"; then
-        php /var/www/html/occ talk:stun:add "$NC_DOMAIN:$TALK_PORT"
+        php /var/www/html/occ talk:stun:add "$TURN_DOMAIN:$TALK_PORT"
         php /var/www/html/occ talk:stun:delete "stun.nextcloud.com:443"
     fi
-    if ! php /var/www/html/occ talk:signaling:list --output="plain" | grep -q "https://$NC_DOMAIN/standalone-signaling/"; then
-        php /var/www/html/occ talk:signaling:add "https://$NC_DOMAIN/standalone-signaling/" "$SIGNALING_SECRET" --verify
+    if ! php /var/www/html/occ talk:signaling:list --output="plain" | grep -q "https://$TALK_HOST$HPB_PATH"; then
+        php /var/www/html/occ talk:signaling:add "https://$TALK_HOST$HPB_PATH" "$SIGNALING_SECRET" --verify
     fi
 else
     if [ "$REMOVE_DISABLED_APPS" = yes ] && [ -d "/var/www/html/custom_apps/spreed" ]; then
@@ -666,6 +725,7 @@ fi
 if [ "$IMAGINARY_ENABLED" = 'yes' ]; then
     php /var/www/html/occ config:system:set enabledPreviewProviders 0 --value="OC\\Preview\\Imaginary"
     php /var/www/html/occ config:system:set preview_imaginary_url --value="http://$IMAGINARY_HOST:9000"
+    php /var/www/html/occ config:system:set preview_imaginary_key --value="$IMAGINARY_SECRET"
 else
     if [ -n "$(php /var/www/html/occ config:system:get preview_imaginary_url)" ]; then
         php /var/www/html/occ config:system:delete enabledPreviewProviders 0
@@ -734,7 +794,7 @@ else
 fi
 
 # Docker socket proxy
-if version_greater "$installed_version" "27.1.0.0"; then
+if version_greater "$installed_version" "27.1.2.0"; then
     if [ "$DOCKER_SOCKET_PROXY_ENABLED" = 'yes' ]; then
         if ! [ -d "/var/www/html/custom_apps/app_api" ]; then
             php /var/www/html/occ app:install app_api

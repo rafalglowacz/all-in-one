@@ -26,23 +26,41 @@ class DockerController
         $this->configurationManager = $configurationManager;
     }
 
-    private function PerformRecursiveContainerStart(string $id, bool $pullContainer = true) : void {
+    private function PerformRecursiveContainerStart(string $id, bool $pullImage = true) : void {
         $container = $this->containerDefinitionFetcher->GetContainerById($id);
 
         foreach($container->GetDependsOn() as $dependency) {
-            $this->PerformRecursiveContainerStart($dependency, $pullContainer);
+            $this->PerformRecursiveContainerStart($dependency, $pullImage);
         }
 
+        // Don't start if container is already running
+        // This is expected to happen if a container is defined in depends_on of multiple containers
+        if ($container->GetRunningState() instanceof RunningState) {
+            error_log('Not starting ' . $id . ' because it was already started.');
+            return;
+        }
+
+        // Skip database image pull if the last shutdown was not clean
         if ($id === 'nextcloud-aio-database') {
             if ($this->dockerActionManager->GetDatabasecontainerExitCode() > 0) {
-                $pullContainer = false;
+                $pullImage = false;
                 error_log('Not pulling the latest database image because the container was not correctly shut down.');
             }
         }
+
+        // Check if docker hub is reachable in order to make sure that we do not try to pull an image if it is down 
+        // and try to mitigate issues that are arising due to that
+        if ($pullImage) {
+            if (!$this->dockerActionManager->isDockerHubReachable($container)) {
+                $pullImage = false;
+                error_log('Not pulling the image for the ' . $container->GetContainerName() . ' container because docker hub does not seem to be reachable.');
+            }
+        }
+
         $this->dockerActionManager->DeleteContainer($container);
         $this->dockerActionManager->CreateVolumes($container);
-        if ($pullContainer) {
-            $this->dockerActionManager->PullContainer($container);
+        if ($pullImage) {
+            $this->dockerActionManager->PullImage($container);
         }
         $this->dockerActionManager->CreateContainer($container);
         $this->dockerActionManager->StartContainer($container);
@@ -155,7 +173,7 @@ class DockerController
         }
 
         if (isset($request->getParsedBody()['install_latest_major'])) {
-            $installLatestMajor = 27;
+            $installLatestMajor = 29;
         } else {
             $installLatestMajor = "";
         }
@@ -179,7 +197,7 @@ class DockerController
         return $response->withStatus(201)->withHeader('Location', '/');
     }
 
-    public function startTopContainer(bool $pullContainer) : void {
+    public function startTopContainer(bool $pullImage) : void {
         $config = $this->configurationManager->GetConfig();
         // set AIO_TOKEN
         $config['AIO_TOKEN'] = bin2hex(random_bytes(24));
@@ -190,7 +208,7 @@ class DockerController
 
         $id = self::TOP_CONTAINER;
 
-        $this->PerformRecursiveContainerStart($id, $pullContainer);
+        $this->PerformRecursiveContainerStart($id, $pullImage);
     }
 
     public function StartWatchtowerContainer(Request $request, Response $response, array $args) : Response {

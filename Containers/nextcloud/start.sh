@@ -54,11 +54,17 @@ sudo -u www-data rm -f "$NEXTCLOUD_DATA_DIR/this-is-a-test-file"
 # Install additional dependencies
 if [ -n "$ADDITIONAL_APKS" ]; then
     if ! [ -f "/additional-apks-are-installed" ]; then
+        # Allow to disable imagemagick without having to download it each time
+        if ! echo "$ADDITIONAL_APKS" | grep -q imagemagick; then
+            apk del imagemagick imagemagick-svg imagemagick-heic imagemagick-tiff;
+        fi
         read -ra ADDITIONAL_APKS_ARRAY <<< "$ADDITIONAL_APKS"
         for app in "${ADDITIONAL_APKS_ARRAY[@]}"; do
-            echo "Installing $app via apk..."
-            if ! apk add --no-cache "$app" >/dev/null; then
-                echo "The packet $app was not installed!"
+            if [ "$app" != imagemagick ]; then
+                echo "Installing $app via apk..."
+                if ! apk add --no-cache "$app" >/dev/null; then
+                    echo "The packet $app was not installed!"
+                fi
             fi
         done
     fi
@@ -131,17 +137,25 @@ if ! sudo -E -u www-data bash /entrypoint.sh; then
     exit 1
 fi
 
-while [ -z "$(dig nextcloud-aio-apache A +short)" ]; do
+while [ "$THIS_IS_AIO" = "true" ] && [ -z "$(dig nextcloud-aio-apache A +short +search)" ]; do
     echo "Waiting for nextcloud-aio-apache to start..."
     sleep 5
 done
-IPv4_ADDRESS_APACHE="$(dig nextcloud-aio-apache A +short | grep '^[0-9.]\+$' | sort | head -n1)"
-IPv6_ADDRESS_APACHE="$(dig nextcloud-aio-apache AAAA +short | grep '^[0-9a-f:]\+$' | sort | head -n1)"
-IPv4_ADDRESS_MASTERCONTAINER="$(dig nextcloud-aio-mastercontainer A +short | grep '^[0-9.]\+$' | sort | head -n1)"
-IPv6_ADDRESS_MASTERCONTAINER="$(dig nextcloud-aio-mastercontainer AAAA +short | grep '^[0-9a-f:]\+$' | sort | head -n1)"
 
-sed -i "s|^;listen.allowed_clients|listen.allowed_clients|" /usr/local/etc/php-fpm.d/www.conf
-sed -i "s|listen.allowed_clients.*|listen.allowed_clients = 127.0.0.1,::1,$IPv4_ADDRESS_APACHE,$IPv6_ADDRESS_APACHE,$IPv4_ADDRESS_MASTERCONTAINER,$IPv6_ADDRESS_MASTERCONTAINER|" /usr/local/etc/php-fpm.d/www.conf
-grep listen.allowed_clients /usr/local/etc/php-fpm.d/www.conf
+set -x
+# shellcheck disable=SC2235
+if [ "$THIS_IS_AIO" = "true" ] && ([ "$APACHE_PORT" = 443 ] || [ "$APACHE_IP_BINDING" = "127.0.0.1" ] || [ "$APACHE_IP_BINDING" = "::1" ]); then
+    IPv4_ADDRESS_APACHE="$(dig nextcloud-aio-apache A +short +search | grep '^[0-9.]\+$' | sort | head -n1)"
+    IPv6_ADDRESS_APACHE="$(dig nextcloud-aio-apache AAAA +short +search | grep '^[0-9a-f:]\+$' | sort | head -n1)"
+    IPv4_ADDRESS_MASTERCONTAINER="$(dig nextcloud-aio-mastercontainer A +short +search | grep '^[0-9.]\+$' | sort | head -n1)"
+    IPv6_ADDRESS_MASTERCONTAINER="$(dig nextcloud-aio-mastercontainer AAAA +short +search | grep '^[0-9a-f:]\+$' | sort | head -n1)"
+
+    sed -i "s|^;listen.allowed_clients|listen.allowed_clients|" /usr/local/etc/php-fpm.d/www.conf
+    sed -i "s|listen.allowed_clients.*|listen.allowed_clients = 127.0.0.1,::1,$IPv4_ADDRESS_APACHE,$IPv6_ADDRESS_APACHE,$IPv4_ADDRESS_MASTERCONTAINER,$IPv6_ADDRESS_MASTERCONTAINER|" /usr/local/etc/php-fpm.d/www.conf
+    sed -i "/^listen.allowed_clients/s/,,/,/g" /usr/local/etc/php-fpm.d/www.conf
+    sed -i "/^listen.allowed_clients/s/,$//" /usr/local/etc/php-fpm.d/www.conf
+    grep listen.allowed_clients /usr/local/etc/php-fpm.d/www.conf
+fi
+set +x
 
 exec "$@"

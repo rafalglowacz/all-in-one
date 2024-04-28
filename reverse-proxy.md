@@ -1,22 +1,57 @@
 # Reverse Proxy Documentation
 
+**Note:** The maintainers of AIO noticed that this documentation is not easy. All contributions that improve this are very welcome!
+
 A [reverse proxy](https://en.wikipedia.org/wiki/Reverse_proxy) is basically a web server that enables computers on the internet to access a service in a [private subnet](https://en.wikipedia.org/wiki/Private_network).
 
 **Please note:** Publishing the AIO interface with a valid certificate to the public internet is **not** the goal of this documentation! Instead, the main goal is to publish Nextcloud with a valid certificate to the public internet which is **not** running inside the mastercontainer but in a different container! If you need a valid certificate for the AIO interface, see [point 5](#5-optional-get-a-valid-certificate-for-the-aio-interface).
 
-In order to run Nextcloud behind a web server or reverse proxy (like Apache, Nginx, Cloudflare Tunnel and else), you need to specify the port that AIO's Apache container shall use, add a specific config to your web server or reverse proxy and modify the startup command a bit. All examples below will use port `11000` as example Apache port which will be exposed on the host to receive unencrypted HTTP traffic from the reverse proxy. Modify the port to your needings.
+In order to run Nextcloud behind a web server or reverse proxy (like Apache, Nginx, Cloudflare Tunnel and else), you need to specify the port that AIO's Apache container shall use, add a specific config to your web server or reverse proxy and modify the startup command a bit. All examples below will use port `11000` as example `APACHE_PORT` which will be exposed on the host to receive unencrypted HTTP traffic from the reverse proxy. **Advice:** If you need https between Nextcloud and the reverse proxy because it is running on a different server in the same network, simply add another reverse proxy to the chain that runs on the same server like AIO and takes care of https proxying (most likely via self-signed cert). Another option is to create a VPN between the server that runs AIO and the server that runs the reverse proxy which takes care of encrypting the connection.
 
 **Attention:** The process to run Nextcloud behind a reverse proxy consists of at least steps 1, 2 and 4:
-1. **Configure the reverse proxy! See [point 1](#1-add-this-to-your-reverse-proxy-config)**
-1. **Use the in this document provided startup command! See [point 2](#2-use-this-startup-command)**
+1. **Configure the reverse proxy! See [point 1](#1-configure-the-reverse-proxy)**
+1. **Use this startup command! See [point 2](#2-use-this-startup-command)**
 1. Optional: If the reverse proxy is installed on the same host and in the host network, you should limit the apache container to only listen on localhost. See [point 3](#3-limit-the-access-to-the-apache-container)
 1. **Open the AIO interface. See [point 4](#4-open-the-aio-interface)**
 1. Optional: Get a valid certificate for the AIO interface! See [point 5](#5-optional-get-a-valid-certificate-for-the-aio-interface)
 1. Optional: How to debug things? See [point 6](#6-how-to-debug-things)
 
-## 1. Add this to your reverse proxy config
-
 **Please note:** Since the Apache container gets created by the mastercontainer, there is **NO** way to provide custom docker labels or custom environmental variables for the Apache container. So please do not attempt to do this because you will fail! Only the documented way will work!
+
+## 1. Configure the reverse proxy
+
+### Adapting the sample web server configurations below
+1. Replace `<your-nc-domain>` with the domain on which you want to run Nextcloud.
+1. Adjust the port `11000` to match your chosen `APACHE_PORT`.
+1. Adjust `localhost` or `127.0.0.1` to point to the Nextcloud server IP or domain depending on where the reverse proxy is running. See the following options.
+
+    <details>
+
+    <summary>On the same server without a container</summary>
+
+    For this setup, the default sample configurations with `localhost:$APACHE_PORT` should work.
+
+    </details>
+
+    <details>
+
+    <summary>On the same server in a Docker container</summary>
+
+    For this setup, you can use as target `host.docker.internal:$APACHE_PORT` instead of `localhost:$APACHE_PORT`. **⚠️ Important:** In order to make this work on Docker for Linux, you need to add `--add-host=host.docker.internal:host-gateway` to the docker run command of your reverse proxy container or `extra_hosts: ["host.docker.internal:host-gateway"]` in docker compose (it works on Docker Desktop by default).
+
+    Another option and actually the recommended way in this case is to use `--network host` option (or `network_mode: host` for docker-compose) as setting for the reverse proxy container to connect it to the host network. If you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy manually. By doing so, the default sample configurations that point at `localhost:$APACHE_PORT` should work without having to modify them.
+
+    </details>
+
+    <details>
+
+    <summary>On a different server (in container or not)</summary>
+
+    Use the private ip-address of the host that shall be running AIO. So e.g. `private.ip.address.of.aio.server:$APACHE_PORT` instead of `localhost:$APACHE_PORT`.
+    
+    If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'` on the server that shall be running AIO (the commands only work on Linux).
+
+    </details>
 
 ### Apache
 
@@ -69,6 +104,10 @@ Add this as a new Apache site config:
     SSLCipherSuite          ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305
     SSLHonorCipherOrder     off
     SSLSessionTickets       off
+
+    # If running apache on a subdomain (eg. nextcloud.example.com) of a domain that already has an wildcard ssl certificate from certbot on this machine, 
+    # the <your-nc-domain> in the below lines should be replaced with just the domain (eg. example.com), not the subdomain. 
+    # In this case the subdomain should already be secured without additional actions
     SSLCertificateFile /etc/letsencrypt/live/<your-nc-domain>/fullchain.pem
     SSLCertificateKeyFile /etc/letsencrypt/live/<your-nc-domain>/privkey.pem
 
@@ -83,7 +122,7 @@ Add this as a new Apache site config:
 </VirtualHost>
 ```
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 To make the config work you can run the following command:
 `sudo a2enmod rewrite proxy proxy_http proxy_wstunnel ssl headers http2`
@@ -105,7 +144,7 @@ https://<your-nc-domain>:443 {
 ```
 The Caddyfile is a text file called `Caddyfile` (no extension) which – if you should be running Caddy inside a container – should usually be created in the same location as your `compose.yaml` file prior to starting the container.
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 **Advice:** You may have a look at [this](https://github.com/nextcloud/all-in-one/discussions/575#discussion-4055615) for a more complete example.
 
@@ -129,8 +168,11 @@ You can get AIO running using the ACME DNS-challenge. Here is how to do it.
         }
     }
     ```
-   Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. You also need to adjust `<provider>` and `<key>` to match your case. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
-1. Now continue with [point 2](#2-use-this-startup-command) but additionally, add `--env SKIP_DOMAIN_VALIDATION=true` to the docker run command of the mastercontainer (but before the last line `nextcloud/all-in-one:latest`) which will disable the dommain validation (because it is known that the domain validation will not when using the DNS-challenge since no port is publicly opened.
+    ⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
+
+    You also need to adjust `<provider>` and `<key>` to match your case.
+
+1. Now continue with [point 2](#2-use-this-startup-command) but additionally, add `--env SKIP_DOMAIN_VALIDATION=true` to the docker run command of the mastercontainer (but before the last line `nextcloud/all-in-one:latest`) which will disable the domain validation (because it is known that the domain validation will not work when using the DNS-challenge since no port is publicly opened).
 
 **Advice:** In order to make it work in your home network, you may add the internal ipv4-address of your reverse proxy as A DNS-record to your domain and disable the dns-rebind-protection in your router. Another way it to set up a local dns-server like a pi-hole and set up a custom dns-record for that domain that points to the internal ip-adddress of your reverse proxy (see https://github.com/nextcloud/all-in-one#how-can-i-access-nextcloud-locally). If both is not possible, you may add the domain to the hosts file which is needed then for any devices that shall use the server.
 
@@ -152,10 +194,11 @@ For a reverse proxy example guide for Citrix ADC VPX / Citrix Netscaler, see thi
 
 <summary>click here to expand</summary>
 
-Although it does not seems like it is the case but from AIO perspective a Cloudflare Tunnel works like a reverse proxy. Please see the [caveats](https://github.com/nextcloud/all-in-one#notes-on-cloudflare-proxytunnel) before proceeding. Here is then how to make it work:
+Although it does not seem like it is the case but from AIO perspective a Cloudflare Tunnel works like a reverse proxy. Please see the [caveats](https://github.com/nextcloud/all-in-one#notes-on-cloudflare-proxytunnel) before proceeding. Here is then how to make it work:
 
-1. Install the Cloudflare Tunnel on the same machine where AIO will be running on and point the Tunnel with the domain that you want to use for AIO to `http://localhost:11000`. ***If the Tunnel is running on a different machine, you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
-1. Now continue with [point 2](#2-use-this-startup-command) but additionally, add `--env SKIP_DOMAIN_VALIDATION=true` to the docker run command which will disable the dommain validation (because it is known that the domain validation will not work behind a Cloudflare Tunnel). So you need to ensure yourself that you've configured everything correctly.
+1. Install the Cloudflare Tunnel on the same machine where AIO will be running on and point the Tunnel with the domain that you want to use for AIO to `http://localhost:11000`.<br>
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
+1. Now continue with [point 2](#2-use-this-startup-command) but additionally, add `--env SKIP_DOMAIN_VALIDATION=true` to the docker run command which will disable the domain validation (because it is known that the domain validation will not work behind a Cloudflare Tunnel). So you need to ensure yourself that you've configured everything correctly.
 
 **Advice:** Make sure to [disable Cloudflares Rocket Loader feature](https://help.nextcloud.com/t/login-page-not-working-solved/149417/8) as otherwise Nextcloud's login prompt will not be shown.
 
@@ -254,7 +297,7 @@ backend Nextcloud
     server Nextcloud localhost:11000 
 ```
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 </details>
 
@@ -320,6 +363,9 @@ server {
         proxy_set_header Connection $connection_upgrade;
     }
 
+    # If running nginx on a subdomain (eg. nextcloud.example.com) of a domain that already has an wildcard ssl certificate from certbot on this machine, 
+    # the <your-nc-domain> in the below lines should be replaced with just the domain (eg. example.com), not the subdomain. 
+    # In this case the subdomain should already be secured without additional actions
     ssl_certificate /etc/letsencrypt/live/<your-nc-domain>/fullchain.pem;   # managed by certbot on host machine
     ssl_certificate_key /etc/letsencrypt/live/<your-nc-domain>/privkey.pem; # managed by certbot on host machine
 
@@ -344,7 +390,7 @@ server {
 
 ```
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `127.0.0.1` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 **Advice:** You may have a look at [this](https://github.com/nextcloud/all-in-one/discussions/588#discussioncomment-2811152) for a more complete example.
 
@@ -357,7 +403,7 @@ Of course you need to modify `<your-nc-domain>` to the domain on which you want 
 <summary>click here to expand</summary>
 
 First, please make sure that the environmental variables `PUID` and `PGID` in the compose.yaml file for NPM are either unset or set to `0`.
-If you need to change the GID/PID then please add `net.ipv4.ip_unprivileged_port_start=0` at the end of `/etc/sysctl.conf`. Note: this will cause that non root users can bind privilleged ports.
+If you need to change the GID/PID then please add `net.ipv4.ip_unprivileged_port_start=0` at the end of `/etc/sysctl.conf`. Note: this will cause that non root users can bind privileged ports.
 
 Second, see these screenshots for a working config:
 
@@ -365,7 +411,7 @@ Second, see these screenshots for a working config:
 
 ![grafik](https://user-images.githubusercontent.com/75573284/213889724-1ab32264-3e0c-4d83-b067-9fe9d1672fb2.png)
 
-![grafik](https://user-images.githubusercontent.com/75573284/213889797-42642302-b079-4378-a4a6-079f4f67058c.png)
+![grafik](https://github.com/nextcloud/all-in-one/assets/24786786/fecbb5ef-d2f4-4e0f-bc4b-82207e2c2809)
 
 ![grafik](https://user-images.githubusercontent.com/75573284/213889746-87dbe8c5-4d1f-492f-b251-bbf82f1510d0.png)
 
@@ -375,7 +421,9 @@ proxy_read_timeout 86400s;
 client_max_body_size 0;
 ```
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also change `<you>@<your-mail-provider-domain>` to a mail address of yours. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
+
+Also change `<you>@<your-mail-provider-domain>` to a mail address of yours.
 
 </details>
 
@@ -466,7 +514,7 @@ myNextcloudApp.use((req, res) => {
 	proxy.web(req, res, {}, onProxyError);
 });
 
-vhost.use(vhostFunc('<your-nextcloud-domain>', myNextcloudApp));
+vhost.use(vhostFunc('<your-nc-domain>', myNextcloudApp));
 
 const httpServer = http.createServer(app);
 httpServer.listen('80');
@@ -477,8 +525,7 @@ httpServer.on('upgrade', (req, socket, head) => {
 });
 ```
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. 
-**Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 </details>
 
@@ -496,7 +543,7 @@ See these screenshots for a working config:
 
 ![image](https://user-images.githubusercontent.com/70434961/213193789-fa936edc-e307-4e6a-9a53-ae26d1bf2f42.jpg)
 
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. Also make sure to adjust the port 11000 to match the chosen `APACHE_PORT`. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 </details>
 
@@ -518,68 +565,72 @@ The examples below define the dynamic configuration in YAML files. If you rather
     # STATIC CONFIGURATION
    
     entryPoints:
-        https:
-            address: ":443" # Create an entrypoint called "https" that uses port 443
+      https:
+        address: ":443" # Create an entrypoint called "https" that uses port 443
+        # If you want to enable HTTP/3 support, uncomment the line below
+        # http3: {}
     
     certificatesResolvers:
-        # Define "letsencrypt" certificate resolver
-        letsencrypt:
-            acme:
-                storage: /letsencrypt/acme.json # Defines the path where certificates should be stored
-                email: <your-email-address> # Where LE sends notification about certificates expiring
-                tlschallenge: true
+      # Define "letsencrypt" certificate resolver
+      letsencrypt:
+        acme:
+          storage: /letsencrypt/acme.json # Defines the path where certificates should be stored
+          email: <your-email-address> # Where LE sends notification about certificates expiring
+          tlschallenge: true
    
     providers:
-        file:
-            directory: "/path/to/dynamic/conf" # Adjust the path according your needs.
-            watch: true
+      file:
+        directory: "/path/to/dynamic/conf" # Adjust the path according your needs.
+        watch: true
+
+    # Enable HTTP/3 feature by uncommenting the lines below. Don't forget to route 443 UDP to Traefik (Firewall\NAT\Traefik Container)
+    # experimental:
+      # http3: true
     ```
 
 1. Declare the router, service and middlewares for Nextcloud in `/path/to/dynamic/conf/nextcloud.yml`:
 
     ```yml
     http:
-        routers:
-            nextcloud:
-                rule: "Host(`<your-nextcloud-domain>`)"
-                entrypoints:
-                    - "https"
-                service: nextcloud
-                middlewares:
-                    - nextcloud-chain
-                tls:
-                    certresolver: "letsencrypt"
+      routers:
+        nextcloud:
+          rule: "Host(`<your-nc-domain>`)"
+          entrypoints:
+            - "https"
+          service: nextcloud
+          middlewares:
+            - nextcloud-chain
+          tls:
+            certresolver: "letsencrypt"
 
-        services:
-            nextcloud:
-                loadBalancer:
-                    servers:
-                        - url: "http://localhost:11000" # Use the host's IP address if Traefik runs outside the host network
+      services:
+        nextcloud:
+          loadBalancer:
+            servers:
+              - url: "http://localhost:11000" # Use the host's IP address if Traefik runs outside the host network
 
-        middlewares:
-            nextcloud-secure-headers:
-                headers:
-                    hostsProxyHeaders:
-                        - "X-Forwarded-Host"
-                    referrerPolicy: "same-origin"
+      middlewares:
+        nextcloud-secure-headers:
+          headers:
+            hostsProxyHeaders:
+              - "X-Forwarded-Host"
+            referrerPolicy: "same-origin"
 
-            https-redirect:
-                redirectscheme:
-                    scheme: https 
-   
-            nextcloud-chain:
-                chain:
-                    middlewares:
-                        # - ... (e.g. rate limiting middleware)
-                        - https-redirect
-                        - nextcloud-secure-headers
+        https-redirect:
+          redirectscheme:
+            scheme: https 
+
+        nextcloud-chain:
+          chain:
+            middlewares:
+              # - ... (e.g. rate limiting middleware)
+              - https-redirect
+              - nextcloud-secure-headers
     ```
 
 ---
 
-Of course you need to modify `<your-nextcloud-domain>` in the `nextcloud.yml` to the domain on which you want to run Nextcloud. Also make sure to adjust the port `11000` to match the chosen `APACHE_PORT`. 
-
-**Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` option (or `network_mode: host` for docker-compose) when starting the reverse proxy container in order to connect the reverse proxy container to the host network (if you are using a firewall on the server, you need to open ports 80 and 443 for the reverse proxy in that case manually). ***If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)***
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 **Hint**: see https://www.youtube.com/watch?v=VLPSRrLMDmA for a video on configuring Traefik.
 
@@ -657,7 +708,9 @@ Simply translate the docker run command into a docker-compose file. You can have
 Use this environment variable during the initial startup of the mastercontainer to make the apache container only listen on localhost: `--env APACHE_IP_BINDING=127.0.0.1`. **Attention:** This is only recommended to be set if you use `localhost` in your reverse proxy config to connect to your AIO instance. If you use an ip-address instead of localhost, you should set it to `0.0.0.0`.
 
 ## 4. Open the AIO interface.
-After starting AIO, you should be able to access the AIO Interface via `https://ip.address.of.the.host:8080`. Enter your domain that you've entered in the reverse proxy config and you should be done. Please do not forget to open/forward port `3478/TCP` and `3478/UDP` in your firewall/router for the Talk container!
+After starting AIO, you should be able to access the AIO Interface via `https://ip.address.of.the.host:8080`.<br>
+⚠️ **Important:** do always use an ip-address if you access this port and not a domain as HSTS might block access to it later! (It is also expected that this port uses a self-signed certificate due to security concerns which you need to accept in your browser)<br>
+Enter your domain in the AIO interface that you've used in the reverse proxy config and you should be done. Please do not forget to open/forward port `3478/TCP` and `3478/UDP` in your firewall/router for the Talk container!
 
 ## 5. Optional: get a valid certificate for the AIO interface
 
@@ -672,8 +725,7 @@ https://<your-nc-domain>:8443 {
     }
 }
 ```
-
-Of course you need to modify `<your-nc-domain>` to the domain on which you want to run Nextcloud. **Please note:** The above configuration will only work if your reverse proxy is running directly on the host that is running the docker daemon. If the reverse proxy is running in a docker container, you can use the `--network host` when starting the reverse proxy container in order to connect the reverse proxy container to the host network. If that is not an option or not possible for you (like e.g. on Windows or if the reverse proxy is running on a different host), you can alternatively instead of `localhost` use the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)
+⚠️ **Please note:** Look into [this](#adapting-the-sample-web-server-configurations-below) to adapt the above example configuration.
 
 Afterwards should the AIO interface be accessible via `https://ip.address.of.the.host:8443`. You can alternatively change the domain to a different subdomain by using `https://<your-alternative-domain>:443` instead of `https://<your-nc-domain>:8443` in the Caddyfile and use that to access the AIO interface.
 
@@ -683,7 +735,7 @@ If something does not work, follow the steps below:
 1. Make sure that you used the docker run command that is described in this reverse proxy documentation. **Hint:** make sure that you have set the `APACHE_PORT` via e.g. `--env APACHE_PORT=11000` during the docker run command!
 1. Make sure to set the `APACHE_IP_BINDING` variable correctly. If in doubt, set it to `--env APACHE_IP_BINDING=0.0.0.0`
 1. Make sure that all ports to which your reverse proxy is pointing match the chosen `APACHE_PORT`.
-1. Make sure that the reverse proxy is running on the host OS or if running in a container, connected to the host network. If that is not possible (e.g. on Windows or if the reverse proxy is running on a different host), substitute `localhost` or `127.0.0.1` in the default configurations by the private ip-address of the host that is running the docker daemon. If you are not sure how to retrieve that, you can run: `ip a | grep "scope global" | head -1 | awk '{print $2}' | sed 's|/.*||'`. If the command returns a public ip-address, use `ip a | grep "scope global" | grep docker0 | awk '{print $2}' | sed 's|/.*||'` instead (the commands only work on Linux)
+1. Make sure to follow [this](#adapting-the-sample-web-server-configurations-below) to adapt the example configurations to your specific setup
 1. Make sure that the mastercontainer is able to spawn other containers. You can do so by checking that the mastercontainer indeed has access to the Docker socket which might not be positioned in one of the suggested directories like `/var/run/docker.sock` but in a different directory, based on your OS and the way how you installed Docker. The mastercontainer logs should help figuring this out. You can have a look at them by running `sudo docker logs nextcloud-aio-mastercontainer` after the container is started the first time.
 1. Check if after the mastercontainer was started, the reverse proxy if running inside a container, can reach the provided apache port. You can test this by running `nc -z localhost 11000; echo $?` from inside the reverse proxy container. If the output is `0`, everything works. Alternatively you can of course use instead of `localhost` the ip-address of the host here for the test.
 1. Make sure that you are not behind CGNAT. If that is the case, you will not be able to open ports properly. In that case you might use a Cloudflare Tunnel.
@@ -692,4 +744,3 @@ If something does not work, follow the steps below:
 1. Check if you have a public IPv4- and public IPv6-address. If you only have a public IPv6-address (e.g. due to DS-Lite), make sure to enable IPv6 in Docker and your whole networking infrastructure (e.g. also by adding an AAAA DNS-entry to your domain).
 1. Try to configure everything from scratch if it still does not work by following https://github.com/nextcloud/all-in-one#how-to-properly-reset-the-instance.
 1. As last resort, you may disable the domain validation by adding `--env SKIP_DOMAIN_VALIDATION=true` to the docker run command. But only use this if you are completely sure that you've correctly configured everything!
-

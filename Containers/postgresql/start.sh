@@ -31,7 +31,7 @@ fi
 if [ -f "$DUMP_DIR/initialization.failed" ]; then
     echo "The database initialization failed. Most likely was a wrong timezone selected."
     echo "The selected timezone is '$TZ'." 
-    echo "Please check if it is in 'TZ database name' column of the timezone list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones#List"
+    echo "Please check if it is in the 'TZ identifier' column of the timezone list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones#List"
     echo "For further clues on what went wrong, look at the logs above."
     echo "You might start again from scratch by following https://github.com/nextcloud/all-in-one#how-to-properly-reset-the-instance and selecting a proper timezone."
     exit 1
@@ -148,38 +148,49 @@ fi
 
 # Modify postgresql.conf
 if [ -f "/var/lib/postgresql/data/postgresql.conf" ]; then
-    echo "Setting max connections..."
-    MEMORY=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
-    MAX_CONNECTIONS=$((MEMORY/50+3))
-    if [ -n "$MAX_CONNECTIONS" ]; then
-        sed -i "s|^max_connections =.*|max_connections = $MAX_CONNECTIONS|" "/var/lib/postgresql/data/postgresql.conf"
-    fi
+    echo "Setting postgres values..."
 
-    # Modify conf
+    # Sync this with max pm.max_children and MaxRequestWorkers
+    # 5000 connections is apparently the highest possible value with postgres so set it to that so that we don't run into a limit here.
+    # We don't actually expect so many connections but don't want to limit it artificially because people will report issues otherwise
+    # Also connections should usually be closed again after the process is done
+    # If we should actually exceed this limit, it is definitely a bug in Nextcloud server or some of its apps that does not close connections correctly and not a bug in AIO
+    sed -i "s|^max_connections =.*|max_connections = 5000|" "/var/lib/postgresql/data/postgresql.conf"
+
+    # Do not log checkpoints
     if grep -q "#log_checkpoints" /var/lib/postgresql/data/postgresql.conf; then
         sed -i 's|#log_checkpoints.*|log_checkpoints = off|' /var/lib/postgresql/data/postgresql.conf
     fi
+
+    # Closing idling connections automatically seems to break any logic so was reverted again to default where it is disabled
+    if grep -q "^idle_session_timeout" /var/lib/postgresql/data/postgresql.conf; then
+        sed -i 's|^idle_session_timeout.*|#idle_session_timeout|' /var/lib/postgresql/data/postgresql.conf
+    fi
 fi
 
+do_database_dump() {
+    set -x
+    rm -f "$DUMP_FILE.temp"
+    touch "$DUMP_DIR/export.failed"
+    if pg_dump --username "$POSTGRES_USER" "$POSTGRES_DB" > "$DUMP_FILE.temp"; then
+        rm -f "$DUMP_FILE"
+        mv "$DUMP_FILE.temp" "$DUMP_FILE"
+        pg_ctl stop -m fast
+        rm "$DUMP_DIR/export.failed"
+        echo 'Database dump successful!'
+        set +x
+        exit 0
+    else
+        pg_ctl stop -m fast
+        echo "Database dump unsuccessful!"
+        set +x
+        exit 1
+    fi
+}
+
 # Catch docker stop attempts
-trap 'true' SIGINT SIGTERM
+trap do_database_dump SIGINT SIGTERM
 
 # Start the database
 exec docker-entrypoint.sh postgres &
 wait $!
-
-# Continue with shutdown procedure: do database dump, etc.
-rm -f "$DUMP_FILE.temp"
-touch "$DUMP_DIR/export.failed"
-if pg_dump --username "$POSTGRES_USER" "$POSTGRES_DB" > "$DUMP_FILE.temp"; then
-    rm -f "$DUMP_FILE"
-    mv "$DUMP_FILE.temp" "$DUMP_FILE"
-    pg_ctl stop -m fast
-    rm "$DUMP_DIR/export.failed"
-    echo 'Database dump successful!'
-    exit 0
-else
-    pg_ctl stop -m fast
-    echo "Database dump unsuccessful!"
-    exit 1
-fi

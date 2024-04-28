@@ -69,13 +69,18 @@ if [ "$BORG_MODE" = backup ]; then
         exit 1
     elif ! [ -f "/nextcloud_aio_volumes/nextcloud_aio_database_dump/database-dump.sql" ]; then
         echo "database-dump is missing. Cannot perform backup!"
+        echo "Please check the database container logs!"
+        exit 1
+    elif ! [ -f "/nextcloud_aio_volumes/nextcloud_aio_nextcloud_data/.ocdata" ]; then
+        echo "The .ocdata file is missing in Nextcloud datadir which means it is invalid!"
+        echo "Is the drive where the datadir is located on still mounted?"
         exit 1
     fi
 
-    # Test that nothing is empty
-    for directory in "${VOLUME_DIRS[@]}"; do
-        if [ -z "$(ls -A "$directory")" ] && [ "$directory" != "/nextcloud_aio_volumes/nextcloud_aio_elasticsearch" ]; then
-            echo "$directory is empty which is not allowed."
+    # Test that default volumes are not empty
+    for volume in "${DEFAULT_VOLUMES[@]}"; do
+        if [ -z "$(ls -A "/nextcloud_aio_volumes/$volume")" ] && [ "$volume" != "nextcloud_aio_elasticsearch" ]; then
+            echo "/nextcloud_aio_volumes/$volume is empty which should not happen!"
             exit 1
         fi
     done

@@ -1,11 +1,16 @@
-FROM php:8.1.24-fpm-alpine3.18
+# syntax=docker/dockerfile:latest
+FROM php:8.2.18-fpm-alpine3.19
 
 ENV PHP_MEMORY_LIMIT 512M
 ENV PHP_UPLOAD_LIMIT 10G
 ENV PHP_MAX_TIME 3600
-ENV NEXTCLOUD_VERSION 27.1.0
+ENV SOURCE_LOCATION /usr/src/nextcloud
+
+# AIO settings start # Do not remove or change this line!
+ENV NEXTCLOUD_VERSION 28.0.5
 ENV AIO_TOKEN 123456
 ENV AIO_URL localhost
+# AIO settings end # Do not remove or change this line!
 
 COPY --chmod=775 *.sh /
 COPY --chmod=774 upgrade.exclude /upgrade.exclude
@@ -18,6 +23,7 @@ VOLUME /var/www/html
 # Custom: change id of www-data user as it needs to be the same like on old installations
 # hadolint ignore=SC2086,DL3003
 RUN set -ex; \
+    apk upgrade --no-cache -a; \
     apk add --no-cache shadow; \
     deluser www-data; \
     groupmod -g 333 xfs; \
@@ -38,6 +44,9 @@ RUN set -ex; \
         gmp-dev \
         icu-dev \
         imagemagick-dev \
+        imagemagick-svg \
+        imagemagick-heic \
+        imagemagick-tiff \
         libevent-dev \
         libjpeg-turbo-dev \
         libmcrypt-dev \
@@ -52,6 +61,7 @@ RUN set -ex; \
     ; \
     \
     docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp; \
+    docker-php-ext-configure ftp --with-openssl-dir=/usr; \
     docker-php-ext-configure ldap; \
     docker-php-ext-install -j "$(nproc)" \
         bcmath \
@@ -68,9 +78,9 @@ RUN set -ex; \
     ; \
     \
 # pecl will claim success even if one install fails, so we need to perform each install separately
-    pecl install APCu-5.1.22; \
+    pecl install APCu-5.1.23; \
     pecl install memcached-3.2.0; \
-    pecl install redis-6.0.1; \
+    pecl install redis-6.0.2; \
     pecl install imagick-3.7.0; \
     \
     docker-php-ext-enable \
@@ -110,10 +120,19 @@ RUN set -ex; \
         echo 'max_input_time=${PHP_MAX_TIME}'; \
     } > /usr/local/etc/php/conf.d/nextcloud.ini; \
     \
+    { \
+        echo 'session.save_handler = redis'; \
+        echo 'session.save_path = "tcp://${REDIS_HOST}:6379?auth=${REDIS_HOST_PASSWORD}"'; \
+        echo 'redis.session.locking_enabled = 1'; \
+        echo 'redis.session.lock_retries = -1'; \
+        echo 'redis.session.lock_wait_time = 10000'; \
+    } > /usr/local/etc/php/conf.d/redis-session.ini; \
+    \
     mkdir -p /var/www/data; \
     chown -R www-data:root /var/www; \
     chmod -R g=u /var/www; \
     \
+# Download Nextcloud archive start # Do not remove or change this line!
     apk add --no-cache --virtual .fetch-deps \
         bzip2 \
         gnupg \
@@ -134,8 +153,9 @@ RUN set -ex; \
     mkdir -p /usr/src/nextcloud/custom_apps; \
     chmod +x /usr/src/nextcloud/occ; \
     mkdir -p /usr/src/nextcloud/config; \
-    mv /*.php /usr/src/nextcloud/config/; \
     apk del .fetch-deps; \
+# Download Nextcloud archive end # Do not remove or change this line!
+    mv /*.php /usr/src/nextcloud/config/; \
     \
 # Template from https://github.com/nextcloud/docker/blob/master/.examples/dockerfiles/full/fpm-alpine/Dockerfile
     apk add --no-cache \
@@ -161,6 +181,7 @@ RUN set -ex; \
         bz2 \
         imap \
         pgsql \
+        ftp \
     ; \
     pecl install smbclient; \
     docker-php-ext-enable smbclient; \
@@ -178,6 +199,8 @@ RUN set -ex; \
     /var/log/supervisord \
     /var/run/supervisord \
     ; \
+    chown www-data:root -R /var/log/supervisord; \
+    chown www-data:root -R /var/run/supervisord; \
     \
     apk add --no-cache \
         bash \
@@ -191,28 +214,34 @@ RUN set -ex; \
         grep \
         nodejs \
         bind-tools \
+        imagemagick \
+        imagemagick-svg \
+        imagemagick-heic \
+        imagemagick-tiff \
         coreutils; \
     \
     grep -q '^pm = dynamic' /usr/local/etc/php-fpm.d/www.conf; \
     sed -i 's/^pm = dynamic/pm = ondemand/' /usr/local/etc/php-fpm.d/www.conf; \
-    sed -i 's/^pm.max_children =.*/pm.max_children = 80/' /usr/local/etc/php-fpm.d/www.conf; \
-    sed -i 's/^pm.start_servers =.*/pm.start_servers = 2/' /usr/local/etc/php-fpm.d/www.conf; \
-    sed -i 's/^pm.min_spare_servers =.*/pm.min_spare_servers = 1/' /usr/local/etc/php-fpm.d/www.conf; \
-    sed -i 's/^pm.max_spare_servers =.*/pm.max_spare_servers = 3/' /usr/local/etc/php-fpm.d/www.conf; \
+# Sync this with max db connections and MaxRequestWorkers
+# We don't actually expect so many children but don't want to limit it artificially because people will report issues otherwise.
+# Also children will usually be terminated again after the process is done due to the ondemand setting
+    sed -i 's/^pm.max_children =.*/pm.max_children = 5000/' /usr/local/etc/php-fpm.d/www.conf; \
     sed -i 's|access.log = /proc/self/fd/2|access.log = /proc/self/fd/1|' /usr/local/etc/php-fpm.d/docker.conf; \
     \
+# AIO cloning start # Do not remove or change this line!
     rm -rf /tmp/nextcloud-aio && \
     mkdir -p /tmp/nextcloud-aio && \
     cd /tmp/nextcloud-aio && \
     git clone https://github.com/nextcloud-releases/all-in-one.git --depth 1 .; \
     mkdir -p /usr/src/nextcloud/apps/nextcloud-aio; \
     cp -r ./app/* /usr/src/nextcloud/apps/nextcloud-aio/; \
+# AIO cloning end # Do not remove or change this line!
     \
     chown www-data:root -R /usr/src && \
     chown www-data:root -R /usr/local/etc/php/conf.d && \
     chown www-data:root -R /usr/local/etc/php-fpm.d && \
     chmod -R 777 /tmp; \
-    rm -r /usr/src/nextcloud/apps/updatenotification; \
+    rm -rf /usr/src/nextcloud/apps/updatenotification; \
     \
     mkdir -p /nc-updater; \
     chown -R www-data:www-data /nc-updater; \

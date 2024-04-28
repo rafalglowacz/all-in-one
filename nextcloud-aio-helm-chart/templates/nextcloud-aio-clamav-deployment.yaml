@@ -3,43 +3,55 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   annotations:
-    kompose.cmd: kompose convert -c -f latest.yml --namespace {{ .Values.NAMESPACE }}
-    kompose.version: 1.30.0 (9d8dcb518)
+    kompose.cmd: kompose convert -c -f latest.yml --namespace "{{ .Values.NAMESPACE }}"
+    kompose.version: 1.32.0 (765fde254)
   labels:
     io.kompose.service: nextcloud-aio-clamav
   name: nextcloud-aio-clamav
-  namespace: {{ .Values.NAMESPACE }}
+  namespace: "{{ .Values.NAMESPACE }}"
 spec:
   replicas: 1
   selector:
     matchLabels:
       io.kompose.service: nextcloud-aio-clamav
+  strategy:
+    type: Recreate
   template:
     metadata:
       annotations:
-        kompose.cmd: kompose convert -c -f latest.yml --namespace {{ .Values.NAMESPACE }}
-        kompose.version: 1.30.0 (9d8dcb518)
+        kompose.cmd: kompose convert -c -f latest.yml --namespace "{{ .Values.NAMESPACE }}"
+        kompose.version: 1.32.0 (765fde254)
       labels:
         io.kompose.network/nextcloud-aio: "true"
         io.kompose.service: nextcloud-aio-clamav
     spec:
       initContainers:
-        - name: init-volumes
+        - name: init-subpath
+          {{- if or .Values.IMAGE_MIRROR_PREFIX .Values.ALPINE_IMAGE_ORG }}
+          image: "{{ .Values.IMAGE_MIRROR_PREFIX }}{{ .Values.ALPINE_IMAGE_ORG}}/alpine"
+          {{- else }}
           image: alpine
+          {{- end }}
           command:
-            - chmod
-            - "777"
+            - mkdir
+            - "-p"
+            - /nextcloud-aio-clamav/data
             - /nextcloud-aio-clamav
-            - /nextcloud-aio-clamav-tmpfs0
-            - /nextcloud-aio-clamav-tmpfs1
-            - /nextcloud-aio-clamav-tmpfs2
           volumeMounts:
-            - name: nextcloud-aio-clamav-tmpfs2
-              mountPath: /nextcloud-aio-clamav-tmpfs2
-            - name: nextcloud-aio-clamav-tmpfs1
-              mountPath: /nextcloud-aio-clamav-tmpfs1
-            - name: nextcloud-aio-clamav-tmpfs0
-              mountPath: /nextcloud-aio-clamav-tmpfs0
+            - name: nextcloud-aio-clamav
+              mountPath: /nextcloud-aio-clamav
+        - name: init-volumes
+          {{- if or .Values.IMAGE_MIRROR_PREFIX .Values.ALPINE_IMAGE_ORG }}
+          image: "{{ .Values.IMAGE_MIRROR_PREFIX }}{{ .Values.ALPINE_IMAGE_ORG}}/alpine"
+          {{- else }}
+          image: alpine
+          {{- end }}
+          command:
+            - chown
+            - 100:100
+            - "-R"
+            - /nextcloud-aio-clamav
+          volumeMounts:
             - name: nextcloud-aio-clamav
               mountPath: /nextcloud-aio-clamav
       containers:
@@ -48,31 +60,21 @@ spec:
               value: "90"
             - name: TZ
               value: "{{ .Values.TIMEZONE }}"
-          image: nextcloud/aio-clamav:20230916_091439-latest
+          image: "{{ .Values.IMAGE_MIRROR_PREFIX }}{{ .Values.NEXTCLOUD_IMAGE_ORG }}/aio-clamav:20240424_101241-latest"
           name: nextcloud-aio-clamav
           ports:
             - containerPort: 3310
-              hostPort: 3310
               protocol: TCP
           securityContext:
-            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - NET_RAW
           volumeMounts:
             - mountPath: /var/lib/clamav
+              subPath: data
               name: nextcloud-aio-clamav
-            - mountPath: /var/lock
-              name: nextcloud-aio-clamav-tmpfs0
-            - mountPath: /var/log/clamav
-              name: nextcloud-aio-clamav-tmpfs1
-            - mountPath: /tmp
-              name: nextcloud-aio-clamav-tmpfs2
       volumes:
         - name: nextcloud-aio-clamav
           persistentVolumeClaim:
             claimName: nextcloud-aio-clamav
-        - emptyDir: {}
-          name: nextcloud-aio-clamav-tmpfs0
-        - emptyDir: {}
-          name: nextcloud-aio-clamav-tmpfs1
-        - emptyDir: {}
-          name: nextcloud-aio-clamav-tmpfs2
 {{- end }}

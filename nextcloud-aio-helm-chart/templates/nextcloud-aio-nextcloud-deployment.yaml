@@ -2,29 +2,50 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   annotations:
-    kompose.cmd: kompose convert -c -f latest.yml --namespace {{ .Values.NAMESPACE }}
-    kompose.version: 1.30.0 (9d8dcb518)
+    kompose.cmd: kompose convert -c -f latest.yml --namespace "{{ .Values.NAMESPACE }}"
+    kompose.version: 1.32.0 (765fde254)
   labels:
     io.kompose.service: nextcloud-aio-nextcloud
   name: nextcloud-aio-nextcloud
-  namespace: {{ .Values.NAMESPACE }}
+  namespace: "{{ .Values.NAMESPACE }}"
 spec:
   replicas: 1
   selector:
     matchLabels:
       io.kompose.service: nextcloud-aio-nextcloud
+  strategy:
+    type: Recreate
   template:
     metadata:
       annotations:
-        kompose.cmd: kompose convert -c -f latest.yml --namespace {{ .Values.NAMESPACE }}
-        kompose.version: 1.30.0 (9d8dcb518)
+        kompose.cmd: kompose convert -c -f latest.yml --namespace "{{ .Values.NAMESPACE }}"
+        kompose.version: 1.32.0 (765fde254)
       labels:
         io.kompose.network/nextcloud-aio: "true"
         io.kompose.service: nextcloud-aio-nextcloud
     spec:
       initContainers:
-        - name: init-volumes
+        - name: "delete-lost-found"
+          {{- if or .Values.IMAGE_MIRROR_PREFIX .Values.ALPINE_IMAGE_ORG }}
+          image: "{{ .Values.IMAGE_MIRROR_PREFIX }}{{ .Values.ALPINE_IMAGE_ORG}}/alpine"
+          {{- else }}
           image: alpine
+          {{- end }}
+          command:
+            - rm
+            - "-rf"
+            - "/nextcloud-aio-nextcloud/lost+found"
+          volumeMounts:
+            - name: nextcloud-aio-nextcloud-trusted-cacerts
+              mountPath: /nextcloud-aio-nextcloud-trusted-cacerts
+            - name: nextcloud-aio-nextcloud
+              mountPath: /nextcloud-aio-nextcloud
+        - name: init-volumes
+          {{- if or .Values.IMAGE_MIRROR_PREFIX .Values.ALPINE_IMAGE_ORG }}
+          image: "{{ .Values.IMAGE_MIRROR_PREFIX }}{{ .Values.ALPINE_IMAGE_ORG}}/alpine"
+          {{- else }}
+          image: alpine
+          {{- end }}
           command:
             - chmod
             - "777"
@@ -37,6 +58,32 @@ spec:
               mountPath: /nextcloud-aio-nextcloud
       containers:
         - env:
+            - name: SMTP_HOST
+              value: "{{ .Values.SMTP_HOST }}"
+            - name: SMTP_SECURE
+              value: "{{ .Values.SMTP_SECURE }}"
+            - name: SMTP_PORT
+              value: "{{ .Values.SMTP_PORT }}"
+            - name: SMTP_AUTHTYPE
+              value: "{{ .Values.SMTP_AUTHTYPE }}"
+            - name: SMTP_NAME
+              value: "{{ .Values.SMTP_NAME }}"
+            - name: SMTP_PASSWORD
+              value: "{{ .Values.SMTP_PASSWORD }}"
+            - name: MAIL_FROM_ADDRESS
+              value: "{{ .Values.MAIL_FROM_ADDRESS }}"
+            - name: MAIL_DOMAIN
+              value: "{{ .Values.MAIL_DOMAIN }}"
+            - name: SUBSCRIPTION_KEY
+              value: "{{ .Values.SUBSCRIPTION_KEY }}"
+            - name: APPS_ALLOWLIST
+              value: "{{ .Values.APPS_ALLOWLIST }}"
+            - name: ADDITIONAL_TRUSTED_PROXY
+              value: "{{ .Values.ADDITIONAL_TRUSTED_PROXY }}"
+            - name: ADDITIONAL_TRUSTED_DOMAIN
+              value: "{{ .Values.ADDITIONAL_TRUSTED_DOMAIN }}"
+            - name: SERVERINFO_TOKEN
+              value: "{{ .Values.SERVERINFO_TOKEN }}"
             - name: ADDITIONAL_APKS
               value: "{{ .Values.NEXTCLOUD_ADDITIONAL_APKS }}"
             - name: ADDITIONAL_PHP_EXTENSIONS
@@ -45,6 +92,8 @@ spec:
               value: "{{ .Values.NEXTCLOUD_PASSWORD }}"
             - name: ADMIN_USER
               value: admin
+            - name: APACHE_PORT
+              value: "{{ .Values.APACHE_PORT }}"
             - name: CLAMAV_ENABLED
               value: "{{ .Values.CLAMAV_ENABLED }}"
             - name: CLAMAV_HOST
@@ -63,6 +112,8 @@ spec:
               value: "{{ .Values.IMAGINARY_ENABLED }}"
             - name: IMAGINARY_HOST
               value: nextcloud-aio-imaginary
+            - name: IMAGINARY_SECRET
+              value: "{{ .Values.IMAGINARY_SECRET }}"
             - name: INSTALL_LATEST_MAJOR
               value: "{{ .Values.INSTALL_LATEST_MAJOR }}"
             - name: NC_DOMAIN
@@ -75,8 +126,6 @@ spec:
               value: nextcloud-aio-onlyoffice
             - name: ONLYOFFICE_SECRET
               value: "{{ .Values.ONLYOFFICE_SECRET }}"
-            - name: OVERWRITEHOST
-              value: "{{ .Values.NC_DOMAIN }}"
             - name: OVERWRITEPROTOCOL
               value: https
             - name: PHP_MAX_TIME
@@ -121,12 +170,17 @@ spec:
               value: "{{ .Values.TIMEZONE }}"
             - name: UPDATE_NEXTCLOUD_APPS
               value: "{{ .Values.UPDATE_NEXTCLOUD_APPS }}"
-          image: nextcloud/aio-nextcloud:20230916_091439-latest
+          image: "{{ .Values.IMAGE_MIRROR_PREFIX }}{{ .Values.NEXTCLOUD_IMAGE_ORG }}/aio-nextcloud:20240424_101241-latest"
           name: nextcloud-aio-nextcloud
           ports:
             - containerPort: 9000
-              hostPort: 9000
               protocol: TCP
+            - containerPort: 9001
+              protocol: TCP
+          securityContext:
+            capabilities:
+              drop:
+                - NET_RAW
           volumeMounts:
             - mountPath: /var/www/html
               name: nextcloud-aio-nextcloud
@@ -135,6 +189,7 @@ spec:
             - mountPath: /usr/local/share/ca-certificates
               name: nextcloud-aio-nextcloud-trusted-cacerts
               readOnly: true
+      terminationGracePeriodSeconds: 600
       volumes:
         - name: nextcloud-aio-nextcloud
           persistentVolumeClaim:

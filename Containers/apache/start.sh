@@ -18,7 +18,7 @@ while ! nc -z "$NEXTCLOUD_HOST" 9000; do
 done
 
 # Get ipv4-address of Apache
-IPv4_ADDRESS="$(dig nextcloud-aio-apache A +short | head -1)"
+IPv4_ADDRESS="$(dig nextcloud-aio-apache A +short +search | head -1)"
 # Bring it in CIDR notation
 # shellcheck disable=SC2001
 IPv4_ADDRESS="$(echo "$IPv4_ADDRESS" | sed 's|[0-9]\+$|1/32|')"
@@ -48,6 +48,12 @@ if [ "$APACHE_PORT" != '443' ]; then
     CADDYFILE="$(sed 's|# trusted_proxies placeholder|trusted_proxies static private_ranges|' /tmp/Caddyfile)"
 else
     CADDYFILE="$(sed "s|# trusted_proxies placeholder|trusted_proxies static $IPv4_ADDRESS|" /tmp/Caddyfile)"
+fi
+echo "$CADDYFILE" > /tmp/Caddyfile
+
+# Remove additional domain if not given
+if [ -z "$ADDITIONAL_TRUSTED_DOMAIN" ]; then
+    CADDYFILE="$(sed '/ADDITIONAL_TRUSTED_DOMAIN/d' /tmp/Caddyfile)"
 fi
 echo "$CADDYFILE" > /tmp/Caddyfile
 

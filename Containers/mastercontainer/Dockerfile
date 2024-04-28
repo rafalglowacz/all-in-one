@@ -1,11 +1,12 @@
+# syntax=docker/dockerfile:latest
 # Docker CLI is a requirement
-FROM docker:24.0.6-cli as docker
+FROM docker:26.1.0-cli as docker
 
 # Caddy is a requirement
-FROM caddy:2.7.4-alpine as caddy
+FROM caddy:2.7.6-alpine as caddy
 
-# From https://github.com/docker-library/php/blob/master/8.2/alpine3.18/fpm/Dockerfile
-FROM php:8.2.11-fpm-alpine3.18
+# From https://github.com/docker-library/php/blob/master/8.3/alpine3.19/fpm/Dockerfile
+FROM php:8.3.6-fpm-alpine3.19
 
 EXPOSE 80
 EXPOSE 8080
@@ -18,12 +19,12 @@ WORKDIR /var/www/docker-aio
 
 # hadolint ignore=SC2086,DL3047,DL3003,DL3004
 RUN set -ex; \
+    apk upgrade --no-cache -a; \
     apk add --no-cache shadow; \
     groupmod -g 333 xfs; \
     usermod -u 333 -g 333 xfs; \
     groupmod -g 33 www-data; \
     usermod -u 33 -g 33 www-data; \
-    apk del --no-cache shadow; \
     \
     apk add --no-cache \
         util-linux-misc \
@@ -32,9 +33,10 @@ RUN set -ex; \
         bash \
         apache2 \
         apache2-proxy \
+        apache2-ssl \
         supervisor \
+        openssl \
         sudo \
-        nss \
         netcat-openbsd \
         curl \
         grep; \
@@ -42,7 +44,7 @@ RUN set -ex; \
     apk add --no-cache --virtual .build-deps \
         autoconf \
         build-base; \
-    pecl install APCu-5.1.22; \
+    pecl install APCu-5.1.23; \
     docker-php-ext-enable apcu; \
     rm -r /tmp/pear; \
     runDeps="$( \
@@ -65,7 +67,6 @@ RUN set -ex; \
     chmod +x /usr/local/bin/composer; \
     cd /var/www/docker-aio; \
     git clone https://github.com/nextcloud-releases/all-in-one.git --depth 1 .; \
-    apk del --no-cache git; \
     find ./ -maxdepth 1 -mindepth 1 -not -path ./php -not -path ./community-containers -exec rm -r {} \; ; \
     chown www-data:www-data -R /var/www/docker-aio; \
     cd php; \
@@ -77,6 +78,10 @@ RUN set -ex; \
     chown -R www-data:www-data /var/www; \
     rm -r php/data; \
     rm -r php/session; \
+    \
+    mkdir -p /etc/apache2/certs; \
+    cd /etc/apache2/certs; \
+    openssl req -new -newkey rsa:4096 -days 3650 -nodes -x509 -subj "/C=DE/ST=BE/L=Local/O=Dev/CN=nextcloud.local" -keyout /etc/apache2/certs/ssl.key -out /etc/apache2/certs/ssl.crt; \
     \
     sed -i \
             -e '/^Listen /d' \
@@ -96,7 +101,13 @@ RUN set -ex; \
             -e 's/\(ScriptAlias \)/#\1/' \
         /etc/apache2/httpd.conf; \
         mkdir -p /etc/apache2/logs; \
+        rm /etc/apache2/conf.d/ssl.conf; \
         echo "ServerName localhost" | tee -a /etc/apache2/httpd.conf; \
+        grep -q '^LoadModule lbmethod_heartbeat_module' /etc/apache2/conf.d/proxy.conf; \
+        sed -i 's|^LoadModule lbmethod_heartbeat_module.*|#LoadModule lbmethod_heartbeat_module|' /etc/apache2/conf.d/proxy.conf; \
+        echo "SSLSessionCache nonenotnull" | tee -a /etc/apache2/httpd.conf; \
+        echo "LoadModule ssl_module modules/mod_ssl.so" | tee -a /etc/apache2/httpd.conf; \
+        echo "LoadModule socache_shmcb_module modules/mod_socache_shmcb.so" | tee -a /etc/apache2/httpd.conf; \
         echo "Include /etc/apache2/sites-available/mastercontainer.conf" | tee -a /etc/apache2/httpd.conf; \
     \
     rm -f /etc/apache2/conf.d/default.conf \
