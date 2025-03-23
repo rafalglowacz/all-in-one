@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:latest
-FROM caddy:2.7.6-alpine as caddy
+FROM caddy:2.9.1-alpine AS caddy
 
-FROM httpd:2.4.59-alpine3.19
+# From https://github.com/docker-library/httpd/blob/master/2.4/alpine/Dockerfile
+FROM httpd:2.4.63-alpine3.21
 
 COPY --from=caddy /usr/bin/caddy /usr/bin/caddy
 
@@ -16,8 +17,6 @@ VOLUME /mnt/data
 RUN set -ex; \
     apk upgrade --no-cache -a; \
     apk add --no-cache shadow; \
-    groupmod -g 333 xfs; \
-    usermod -u 333 -g 333 xfs; \
     groupmod -g 33 www-data; \
     usermod -u 33 -g 33 www-data; \
     apk del --no-cache shadow; \
@@ -82,7 +81,7 @@ RUN set -ex; \
     \
     echo "root:$(openssl rand -base64 12)" | chpasswd
 
-USER www-data
+USER 33
 
 ENTRYPOINT ["/start.sh"]
 CMD ["/usr/bin/supervisord", "-c", "/supervisord.conf"]

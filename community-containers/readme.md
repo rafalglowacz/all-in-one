@@ -2,8 +2,6 @@
 This directory features containers that are built for AIO which allows to add additional functionality very easily.
 
 ## Disclaimers
-⚠️ This is currently beta and not stable yet!
-
 All containers that are in this directory are community maintained so the responsibility is on the community to keep them updated and secure. There is no guarantee that this will be the case in the future.
 
 ## How to use this?
@@ -15,7 +13,7 @@ Afterwards, you might want to add additional community containers to the default
 Simply submit a PR by creating a new folder in this directory: https://github.com/nextcloud/all-in-one/tree/main/community-containers with the name of your container. It must include a json file with the same name and with correct syntax and a readme.md with additional information. You might get inspired by caddy, fail2ban, local-ai, libretranslate, plex, pi-hole or vaultwarden (subfolders in this directory). For a full-blown example of the json file, see https://github.com/nextcloud/all-in-one/blob/main/php/containers.json. The json-schema that it validates against can be found here: https://github.com/nextcloud/all-in-one/blob/main/php/containers-schema.json.
 
 ### Is there a list of ideas for new community containers?
-Yes, see [this list](https://github.com/nextcloud/all-in-one/discussions/categories/ideas?discussions_q=is%3Aopen+category%3AIdeas+label%3A%22help+wanted%22+sort%3Atop) for already existing ideas for new community containers. Feel free to pick one up and add it to this folder by following the instructions above.
+Yes, see [this list](https://github.com/nextcloud/all-in-one/issues/5251) for already existing ideas for new community containers. Feel free to pick one up and add it to this folder by following the instructions above.
 
 ## How to remove containers from AIOs stack?
 In some cases, you might want to remove some community containers from the AIO stack again. Here is how to do this.

@@ -86,6 +86,8 @@ $app->get('/containers', function (Request $request, Response $response, array $
         'domain' => $configurationManager->GetDomain(),
         'apache_port' => $configurationManager->GetApachePort(),
         'borg_backup_host_location' => $configurationManager->GetBorgBackupHostLocation(),
+        'borg_remote_repo' => $configurationManager->GetBorgRemoteRepo(),
+        'borg_public_key' => $configurationManager->GetBorgPublicKey(),
         'nextcloud_password' => $configurationManager->GetAndGenerateSecret('NEXTCLOUD_PASSWORD'),
         'containers' => (new \AIO\ContainerDefinitionFetcher($container->get(\AIO\Data\ConfigurationManager::class), $container))->FetchDefinition(),
         'borgbackup_password' => $configurationManager->GetAndGenerateSecret('BORGBACKUP_PASSWORD'),
@@ -100,7 +102,6 @@ $app->get('/containers', function (Request $request, Response $response, array $
         'last_backup_time' => $configurationManager->GetLastBackupTime(),
         'backup_times' => $configurationManager->GetBackupTimes(),
         'current_channel' => $dockerActionManger->GetCurrentChannel(),
-        'is_x64_platform' => $configurationManager->isx64Platform(),
         'is_clamav_enabled' => $configurationManager->isClamavEnabled(),
         'is_onlyoffice_enabled' => $configurationManager->isOnlyofficeEnabled(),
         'is_collabora_enabled' => $configurationManager->isCollaboraEnabled(),
@@ -112,6 +113,7 @@ $app->get('/containers', function (Request $request, Response $response, array $
         'skip_domain_validation' => $configurationManager->shouldDomainValidationBeSkipped(),
         'talk_port' => $configurationManager->GetTalkPort(),
         'collabora_dictionaries' => $configurationManager->GetCollaboraDictionaries(),
+        'collabora_additional_options' => $configurationManager->GetAdditionalCollaboraOptions(),
         'automatic_updates' => $configurationManager->areAutomaticUpdatesEnabled(),
         'is_backup_section_enabled' => $configurationManager->isBackupSectionEnabled(),
         'is_imaginary_enabled' => $configurationManager->isImaginaryEnabled(),
@@ -123,8 +125,10 @@ $app->get('/containers', function (Request $request, Response $response, array $
         'nextcloud_max_time' => $configurationManager->GetNextcloudMaxTime(),
         'nextcloud_memory_limit' => $configurationManager->GetNextcloudMemoryLimit(),
         'is_dri_device_enabled' => $configurationManager->isDriDeviceEnabled(),
+        'is_nvidia_gpu_enabled' => $configurationManager->isNvidiaGpuEnabled(),
         'is_talk_recording_enabled' => $configurationManager->isTalkRecordingEnabled(),
         'is_docker_socket_proxy_enabled' => $configurationManager->isDockerSocketProxyEnabled(),
+        'is_whiteboard_enabled' => $configurationManager->isWhiteboardEnabled(),        
     ]);
 })->setName('profile');
 $app->get('/login', function (Request $request, Response $response, array $args) use ($container) {

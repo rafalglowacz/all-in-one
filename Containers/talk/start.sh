@@ -20,22 +20,33 @@ fi
 
 set -x
 IPv4_ADDRESS_TALK_RELAY="$(hostname -i | grep -oP '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-IPv4_ADDRESS_TALK="$(dig nextcloud-aio-talk IN A +short +search | grep '^[0-9.]\+$' | sort | head -n1)"
-IPv6_ADDRESS_TALK="$(dig nextcloud-aio-talk AAAA +short +search | grep '^[0-9a-f:]\+$' | sort | head -n1)"
+# shellcheck disable=SC2153
+IPv4_ADDRESS_TALK="$(dig "$TALK_HOST" IN A +short +search | grep '^[0-9.]\+$' | sort | head -n1)"
+# shellcheck disable=SC2153
+IPv6_ADDRESS_TALK="$(dig "$TALK_HOST" AAAA +short +search | grep '^[0-9a-f:]\+$' | sort | head -n1)"
 set +x
 
 if [ -n "$IPv4_ADDRESS_TALK" ] && [ "$IPv4_ADDRESS_TALK_RELAY" = "$IPv4_ADDRESS_TALK" ]; then
     IPv4_ADDRESS_TALK=""
 fi
 
+set -x
+IP_BINDING="::"
+if grep -q "1" /sys/module/ipv6/parameters/disable \
+|| grep -q "1" /proc/sys/net/ipv6/conf/all/disable_ipv6 \
+|| grep -q "1" /proc/sys/net/ipv6/conf/default/disable_ipv6; then
+    IP_BINDING="0.0.0.0"
+fi
+set +x
+
 # Turn
 cat << TURN_CONF > "/conf/eturnal.yml"
 eturnal:
   listen:
-    - ip: "::"
+    - ip: "$IP_BINDING"
       port: $TALK_PORT
       transport: udp
-    - ip: "::"
+    - ip: "$IP_BINDING"
       port: $TALK_PORT
       transport: tcp
   log_dir: stdout

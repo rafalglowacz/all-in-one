@@ -1,5 +1,11 @@
 # Nextcloud AIO Helm-chart
 
+> [!NOTE]
+> For an enterprise-ready and scalable deployment method based on Helm Charts (also available for Podman), please [contact Nextcloud GmbH](https://nextcloud.com/enterprise/).
+
+> [!IMPORTANT]
+> This Helm-Chart is not intended to be used with Ingress as it handles TLS itself via the built-in apache container and exposes a Loadbalancer port itself on the Cluster. See the [apache service](https://github.com/nextcloud/all-in-one/blob/main/nextcloud-aio-helm-chart/templates/nextcloud-aio-apache-service.yaml). However if the Cluster is used behind NAT, you can adjust `APACHE_PORT` to a different one than 443 and do the TLS offloading on an external Reverse Proxy that forwards the traffic to the configured port via http. If you really need the Ingress feature, please [contact Nextcloud GmbH](https://nextcloud.com/enterprise/) as we offer an enterprise-ready and scalable deployment method based on Helm Charts that also allows Ingress to be used.
+
 You can run the containers that are build for AIO with Kubernetes using this Helm chart. This comes with a few downsides, that are discussed below.
 
 ### Advantages
@@ -18,13 +24,14 @@ You can run the containers that are build for AIO with Kubernetes using this Hel
 
 ## How to use this?
 
-First download this file: https://raw.githubusercontent.com/nextcloud/all-in-one/main/nextcloud-aio-helm-chart/values.yaml and adjust at least all values marked with `# TODO!`
+First download this file: https://raw.githubusercontent.com/nextcloud/all-in-one/main/nextcloud-aio-helm-chart/values.yaml and adjust at least all values marked with `# TODO!`<br>
+⚠️ **Warning**: Do not use the symbols `@` and `:` in your passwords. These symbols are used to build database connection strings. You will experience issues when using these symbols!
 
 Then run:
 
 ```
 helm repo add nextcloud-aio https://nextcloud.github.io/all-in-one/
-helm install my-release nextcloud-aio/nextcloud-aio-helm-chart -f values.yaml
+helm install nextcloud-aio nextcloud-aio/nextcloud-aio-helm-chart -f values.yaml
 ```
 
 And after a while, everything should be set up.

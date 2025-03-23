@@ -33,6 +33,10 @@ class ConfigurationManager
     }
 
     public function GetAndGenerateSecret(string $secretId) : string {
+        if ($secretId === '') {
+            return '';
+        }
+
         $config = $this->GetConfig();
         if(!isset($config['secrets'][$secretId])) {
             $config['secrets'][$secretId] = bin2hex(random_bytes(24));
@@ -128,7 +132,7 @@ class ConfigurationManager
         }
     }
 
-    public function isx64Platform() : bool {
+    private function isx64Platform() : bool {
         if (php_uname('m') === 'x86_64') {
             return true;
         } else {
@@ -136,11 +140,7 @@ class ConfigurationManager
         }
     }
 
-    public function isClamavEnabled() : bool {
-        if (!$this->isx64Platform()) {
-            return false;
-        }
-        
+    public function isClamavEnabled() : bool {        
         $config = $this->GetConfig();
         if (isset($config['isClamavEnabled']) && $config['isClamavEnabled'] === 1) {
             return true;
@@ -161,6 +161,21 @@ class ConfigurationManager
     public function SetDockerSocketProxyEnabledState(int $value) : void {
         $config = $this->GetConfig();
         $config['isDockerSocketProxyEnabled'] = $value;
+        $this->WriteConfig($config);
+    }
+
+    public function isWhiteboardEnabled() : bool {
+        $config = $this->GetConfig();
+        if (isset($config['isWhiteboardEnabled']) && $config['isWhiteboardEnabled'] === 0) {
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    public function SetWhiteboardEnabledState(int $value) : void {
+        $config = $this->GetConfig();
+        $config['isWhiteboardEnabled'] = $value;
         $this->WriteConfig($config);
     }
 
@@ -195,6 +210,11 @@ class ConfigurationManager
     }
 
     public function SetFulltextsearchEnabledState(int $value) : void {
+        // Elasticsearch does not work on kernels without seccomp anymore. See https://github.com/nextcloud/all-in-one/discussions/5768
+        if ($this->GetCollaboraSeccompDisabledState() === 'true') {
+            $value = 0;
+        }
+
         $config = $this->GetConfig();
         $config['isFulltextsearchEnabled'] = $value;
         $this->WriteConfig($config);
@@ -261,6 +281,12 @@ class ConfigurationManager
         if (!$this->isTalkEnabled()) {
             $value = 0;
         }
+
+        // Currently only works on x64. See https://github.com/nextcloud/nextcloud-talk-recording/issues/17
+        if (!$this->isx64Platform()) {
+            $value = 0;
+        }
+
         $config = $this->GetConfig();
         $config['isTalkRecordingEnabled'] = $value;
         $this->WriteConfig($config);
@@ -271,17 +297,17 @@ class ConfigurationManager
      */
     public function SetDomain(string $domain) : void {
         // Validate that at least one dot is contained
-        if (strpos($domain, '.') === false) {
+        if (!str_contains($domain, '.')) {
             throw new InvalidSettingConfigurationException("Domain must contain at least one dot!");
         }
 
         // Validate that no slashes are contained
-        if (strpos($domain, '/') !== false) {
+        if (str_contains($domain, '/')) {
             throw new InvalidSettingConfigurationException("Domain must not contain slashes!");
         }
 
         // Validate that no colons are contained
-        if (strpos($domain, ':') !== false) {
+        if (str_contains($domain, ':')) {
             throw new InvalidSettingConfigurationException("Domain must not contain colons!");
         }
 
@@ -305,7 +331,7 @@ class ConfigurationManager
 
             if (empty($dnsRecordIP)) {
                 $record = dns_get_record($domain, DNS_AAAA);
-                if (!empty($record[0]['ipv6'])) {
+                if (isset($record[0]['ipv6']) && !empty($record[0]['ipv6'])) {
                     $dnsRecordIP = $record[0]['ipv6'];
                 }
             }
@@ -320,9 +346,9 @@ class ConfigurationManager
 
             if (!filter_var($dnsRecordIP, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
                 if ($port === '443') {
-                    throw new InvalidSettingConfigurationException("It seems like the ip-address of the domain is set to an internal or reserved ip-address. This is not supported. (It was found to be set to '" . $dnsRecordIP . "'). Please set it to a public ip-address so that the domain validation can work!");
+                    throw new InvalidSettingConfigurationException("It seems like the ip-address of the domain is set to an internal or reserved ip-address. This is not supported by the domain validation. (It was found to be set to '" . $dnsRecordIP . "'). Please set it to a public ip-address so that the domain validation can work or skip the domain validation!");
                 } else {
-                    error_log("It seems like the ip-address of " . $domain . " is set to an internal or reserved ip-address. (It was found to be set to '" . $dnsRecordIP . "')");
+                    error_log("Info: It seems like the ip-address of " . $domain . " is set to an internal or reserved ip-address. (It was found to be set to '" . $dnsRecordIP . "')");
                 }
             }
 
@@ -412,6 +438,15 @@ class ConfigurationManager
         return $config['selected-restore-time'];
     }
 
+    public function GetRestoreExcludePreviews() : string {
+        $config = $this->GetConfig();
+        if(!isset($config['restore-exclude-previews'])) {
+            $config['restore-exclude-previews'] = '';
+        }
+
+        return $config['restore-exclude-previews'];
+    }
+
     public function GetAIOURL() : string {
         $config = $this->GetConfig();
         if(!isset($config['AIO_URL'])) {
@@ -424,48 +459,61 @@ class ConfigurationManager
     /**
      * @throws InvalidSettingConfigurationException
      */
-    public function SetBorgBackupHostLocation(string $location) : void {
-        $isValidPath = false;
-        if (str_starts_with($location, '/') && !str_ends_with($location, '/')) {
-            $isValidPath = true;
-        } elseif ($location === 'nextcloud_aio_backupdir') {
-            $isValidPath = true;
-        }
-
-        if (!$isValidPath) {
-            throw new InvalidSettingConfigurationException("The path must start with '/', and must not end with '/'!");
-        }
-
+    public function SetBorgLocationVars(string $location, string $repo) : void {
+        $this->ValidateBorgLocationVars($location, $repo);
 
         $config = $this->GetConfig();
         $config['borg_backup_host_location'] = $location;
+        $config['borg_remote_repo'] = $repo;
         $this->WriteConfig($config);
     }
 
-    public function DeleteBorgBackupHostLocation() : void {
-        $config = $this->GetConfig();
-        $config['borg_backup_host_location'] = '';
-        $this->WriteConfig($config);
-    }
-
-        /**
-     * @throws InvalidSettingConfigurationException
-     */
-    public function SetBorgRestoreHostLocationAndPassword(string $location, string $password) : void {
-        if ($location === '') {
-            throw new InvalidSettingConfigurationException("Please enter a path!");
+    private function ValidateBorgLocationVars(string $location, string $repo) : void {
+        if ($location === '' && $repo === '') {
+            throw new InvalidSettingConfigurationException("Please enter a path or a remote repo url!");
+        } elseif ($location !== '' && $repo !== '') {
+            throw new InvalidSettingConfigurationException("Location and remote repo url are mutually exclusive!");
         }
         
-        $isValidPath = false;
-        if (str_starts_with($location, '/') && !str_ends_with($location, '/')) {
-            $isValidPath = true;
-        } elseif ($location === 'nextcloud_aio_backupdir') {
-            $isValidPath = true;
-        }
+        if ($location !== '') {
+            $isValidPath = false;
+            if (str_starts_with($location, '/') && !str_ends_with($location, '/')) {
+                $isValidPath = true;
+            } elseif ($location === 'nextcloud_aio_backupdir') {
+                $isValidPath = true;
+            }
 
-        if (!$isValidPath) {
-            throw new InvalidSettingConfigurationException("The path must start with '/', and must not end with '/'!");
+            if (!$isValidPath) {
+                throw new InvalidSettingConfigurationException("The path must start with '/', and must not end with '/'!");
+            }
+        } else {
+            $this->ValidateBorgRemoteRepo($repo);
         }
+    }
+
+    private function ValidateBorgRemoteRepo(string $repo) : void {
+        $commonMsg = "For valid urls, see the remote examples at https://borgbackup.readthedocs.io/en/stable/usage/general.html#repository-urls";
+        if ($repo === "") {
+            // Ok, remote repo is optional
+        } elseif (!str_contains($repo, "@")) {
+            throw new InvalidSettingConfigurationException("The remote repo must contain '@'. $commonMsg");
+        } elseif (!str_contains($repo, ":")) {
+            throw new InvalidSettingConfigurationException("The remote repo must contain ':'. $commonMsg");
+        }
+    }
+
+    public function DeleteBorgBackupLocationVars() : void {
+        $config = $this->GetConfig();
+        $config['borg_backup_host_location'] = '';
+        $config['borg_remote_repo'] = '';
+        $this->WriteConfig($config);
+    }
+
+    /**
+     * @throws InvalidSettingConfigurationException
+     */
+    public function SetBorgRestoreLocationVarsAndPassword(string $location, string $repo, string $password) : void {
+        $this->ValidateBorgLocationVars($location, $repo);
 
         if ($password === '') {
             throw new InvalidSettingConfigurationException("Please enter the password!");
@@ -473,6 +521,7 @@ class ConfigurationManager
 
         $config = $this->GetConfig();
         $config['borg_backup_host_location'] = $location;
+        $config['borg_remote_repo'] = $repo;
         $config['borg_restore_password'] = $password;
         $config['instance_restore_attempt'] = 1;
         $this->WriteConfig($config);
@@ -567,6 +616,23 @@ class ConfigurationManager
         return $config['borg_backup_host_location'];
     }
 
+    public function GetBorgRemoteRepo() : string {
+        $config = $this->GetConfig();
+        if(!isset($config['borg_remote_repo'])) {
+            $config['borg_remote_repo'] = '';
+        }
+
+        return $config['borg_remote_repo'];
+    }
+
+    public function GetBorgPublicKey() : string {
+        if (!file_exists(DataConst::GetBackupPublicKey())) {
+            return "";
+        }
+        
+        return trim(file_get_contents(DataConst::GetBackupPublicKey()));
+    }
+
     public function GetBorgRestorePassword() : string {
         $config = $this->GetConfig();
         if(!isset($config['borg_restore_password'])) {
@@ -614,7 +680,7 @@ class ConfigurationManager
     public function GetNextcloudUploadLimit() : string {
         $envVariableName = 'NEXTCLOUD_UPLOAD_LIMIT';
         $configName = 'nextcloud_upload_limit';
-        $defaultValue = '10G';
+        $defaultValue = '16G';
         return $this->GetEnvironmentalVariableOrConfig($envVariableName, $configName, $defaultValue);
     }
 
@@ -641,6 +707,13 @@ class ConfigurationManager
         $envVariableName = 'BORG_RETENTION_POLICY';
         $configName = 'borg_retention_policy';
         $defaultValue = '--keep-within=7d --keep-weekly=4 --keep-monthly=6';
+        return $this->GetEnvironmentalVariableOrConfig($envVariableName, $configName, $defaultValue);
+    }
+
+    public function GetFulltextsearchJavaOptions() : string {
+        $envVariableName = 'FULLTEXTSEARCH_JAVA_OPTIONS';
+        $configName = 'fulltextsearch_java_options';
+        $defaultValue = '-Xms512M -Xmx512M';
         return $this->GetEnvironmentalVariableOrConfig($envVariableName, $configName, $defaultValue);
     }
 
@@ -827,7 +900,7 @@ class ConfigurationManager
     }
 
     public function shouldDomainValidationBeSkipped() : bool {
-        if (getenv('SKIP_DOMAIN_VALIDATION') !== false) {
+        if (getenv('SKIP_DOMAIN_VALIDATION') === 'true') {
             return true;
         }
         return false;
@@ -871,6 +944,45 @@ class ConfigurationManager
         $config = $this->GetConfig();
         $config['collabora_dictionaries'] = '';
         $this->WriteConfig($config);
+    }
+
+    /**
+     * @throws InvalidSettingConfigurationException
+     */
+    public function SetAdditionalCollaboraOptions(string $additionalCollaboraOptions) : void {
+        if ($additionalCollaboraOptions === "") {
+            throw new InvalidSettingConfigurationException("The additional options must not be empty!");
+        }
+
+        if (!preg_match("#^--o:#", $additionalCollaboraOptions)) {
+            throw new InvalidSettingConfigurationException("The entered options must start with '--o:'. So the config does not seem to be a valid!");
+        }
+
+        $config = $this->GetConfig();
+        $config['collabora_additional_options'] = $additionalCollaboraOptions;
+        $this->WriteConfig($config);
+    }
+
+    public function GetAdditionalCollaboraOptions() : string {
+        $config = $this->GetConfig();
+        if(!isset($config['collabora_additional_options'])) {
+            $config['collabora_additional_options'] = '';
+        }
+
+        return $config['collabora_additional_options'];
+    }
+
+    public function DeleteAdditionalCollaboraOptions() : void {
+        $config = $this->GetConfig();
+        $config['collabora_additional_options'] = '';
+        $this->WriteConfig($config);
+    }
+
+    public function GetApacheAdditionalNetwork() : string {
+        $envVariableName = 'APACHE_ADDITIONAL_NETWORK';
+        $configName = 'apache_additional_network';
+        $defaultValue = '';
+        return $this->GetEnvironmentalVariableOrConfig($envVariableName, $configName, $defaultValue);
     }
 
     public function GetApacheIPBinding() : string {
@@ -919,6 +1031,17 @@ class ConfigurationManager
         } else {
             return false;
         }
+    }
+
+    private function GetEnabledNvidiaGpu() : string {
+        $envVariableName = 'NEXTCLOUD_ENABLE_NVIDIA_GPU';
+        $configName = 'enable_nvidia_gpu';
+        $defaultValue = '';
+        return $this->GetEnvironmentalVariableOrConfig($envVariableName, $configName, $defaultValue);
+    }
+
+    public function isNvidiaGpuEnabled() : bool {
+        return $this->GetEnabledNvidiaGpu() === 'true';
     }
 
     private function GetKeepDisabledApps() : string {

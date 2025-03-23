@@ -14,6 +14,7 @@ if (getenv('OBJECTSTORE_S3_BUCKET')) {
         'region' => getenv('OBJECTSTORE_S3_REGION') ?: '',
         'hostname' => getenv('OBJECTSTORE_S3_HOST') ?: '',
         'port' => getenv('OBJECTSTORE_S3_PORT') ?: '',
+        'storageClass' => getenv('OBJECTSTORE_S3_STORAGE_CLASS') ?: '',
         'objectPrefix' => getenv("OBJECTSTORE_S3_OBJECT_PREFIX") ? getenv("OBJECTSTORE_S3_OBJECT_PREFIX") : "urn:oid:",
         'autocreate' => (strtolower($autocreate) === 'false' || $autocreate == false) ? false : true,
         'use_ssl' => (strtolower($use_ssl) === 'false' || $use_ssl == false) ? false : true,
@@ -24,4 +25,9 @@ if (getenv('OBJECTSTORE_S3_BUCKET')) {
       )
     )
   );
-} 
+
+  $sse_c_key = getenv('OBJECTSTORE_S3_SSE_C_KEY');
+  if ($sse_c_key) {
+    $CONFIG['objectstore']['arguments']['sse_c_key'] = $sse_c_key;
+  }
+}

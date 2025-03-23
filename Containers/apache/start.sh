@@ -18,10 +18,11 @@ while ! nc -z "$NEXTCLOUD_HOST" 9000; do
 done
 
 # Get ipv4-address of Apache
-IPv4_ADDRESS="$(dig nextcloud-aio-apache A +short +search | head -1)"
+# shellcheck disable=SC2153
+IPv4_ADDRESS="$(dig "$APACHE_HOST" A +short +search | head -1)"
 # Bring it in CIDR notation
 # shellcheck disable=SC2001
-IPv4_ADDRESS="$(echo "$IPv4_ADDRESS" | sed 's|[0-9]\+$|1/32|')"
+IPv4_ADDRESS="$(echo "$IPv4_ADDRESS" | sed 's|[0-9]\+$|0/16|')"
 
 if [ -z "$APACHE_PORT" ]; then
     export APACHE_PORT="443"
@@ -62,15 +63,6 @@ caddy fmt --overwrite /tmp/Caddyfile
 
 # Add caddy path
 mkdir -p /mnt/data/caddy/
-
-# Add caddy import path
-mkdir -p /mnt/data/caddy-imports
-
-# Remove falsely added Nextcloud conf
-rm -f /mnt/data/caddy-imports/nextcloud
-
-# Make sure that the caddy-imports dir is not empty
-echo "# empty file so that caddy does not print a warning" > /mnt/data/caddy-imports/empty
 
 # Fix apache startup
 rm -f /usr/local/apache2/logs/httpd.pid
