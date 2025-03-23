@@ -2,6 +2,8 @@
 .idea/
 *.iml
 
+/Caddyfile
+
 /php/data/*
 /php/session/*
 !/php/data/.gitkeep
