@@ -11,7 +11,7 @@ jobs:
     name: Run nextcloud-update script
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Run nextcloud-update script
       run: |
         # Inspired by https://github.com/nextcloud/docker/blob/master/update.sh
@@ -59,12 +59,6 @@ jobs:
             | tail -1
         )"
         sed -i "s|\(pecl install[^;]*imagick-\)[0-9.]*|\1$imagick_version|" ./Containers/nextcloud/Dockerfile
-
-        # Imagick git-commit-hash from HEAD
-        imagick_commit_hash="$(
-          git ls-remote https://github.com/imagick/imagick.git HEAD | awk '{print $1}'
-        )"
-        sed -i "s/\(ARG IMAGICK_COMMIT_HASH=\)[a-fA-F0-9]*$/\1$imagick_commit_hash/" ./Containers/nextcloud/Dockerfile
 
         # Igbinary
         igbinary_version="$(

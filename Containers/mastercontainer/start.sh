@@ -33,15 +33,23 @@ if [ "$*" != "" ]; then
 fi
 
 # Check if socket is available and readable
-if ! [ -a "/var/run/docker.sock" ]; then
+if ! [ -e "/var/run/docker.sock" ]; then
     print_red "Docker socket is not available. Cannot continue."
     echo "Please make sure to mount the docker socket into /var/run/docker.sock inside the container!"
     echo "If you did this by purpose because you don't want the container to have access to the docker socket, see https://github.com/nextcloud/all-in-one/tree/main/manual-install."
+    echo "And https://github.com/nextcloud/all-in-one/blob/main/manual-install/latest.yml"
     exit 1
 elif ! mountpoint -q "/mnt/docker-aio-config"; then
     print_red "/mnt/docker-aio-config is not a mountpoint. Cannot proceed!"
     echo "Please make sure to mount the nextcloud_aio_mastercontainer docker volume into /mnt/docker-aio-config inside the container!"
     echo "If you are on TrueNas SCALE, see https://github.com/nextcloud/all-in-one#can-i-run-aio-on-truenas-scale"
+    exit 1
+elif mountpoint -q /var/www/docker-aio/php/containers.json; then
+    print_red "/var/www/docker-aio/php/containers.json is a mountpoint. Cannot proceed!"
+    echo "This is a not-supported customization of the mastercontainer!"
+    echo "Please remove this bind-mount from the mastercontainer."
+    echo "If you need to customize things, feel free to use https://github.com/nextcloud/all-in-one/tree/main/manual-install"
+    echo "See https://github.com/nextcloud/all-in-one/blob/main/manual-install/latest.yml"
     exit 1
 elif ! sudo -u www-data test -r /var/run/docker.sock; then
     echo "Trying to fix docker.sock permissions internally..."
@@ -258,37 +266,18 @@ It is set to '$NEXTCLOUD_ADDITIONAL_PHP_EXTENSIONS'."
     fi
 fi
 if [ -n "$AIO_COMMUNITY_CONTAINERS" ]; then
-    read -ra AIO_CCONTAINERS <<< "$AIO_COMMUNITY_CONTAINERS"
-    for container in "${AIO_CCONTAINERS[@]}"; do
-        if ! [ -d "/var/www/docker-aio/community-containers/$container" ]; then
-            print_red "The community container $container was not found!"
-            FAIL_CCONTAINERS=1
-        fi
-    done
-    if [ -n "$FAIL_CCONTAINERS" ]; then
-        print_red "You've set AIO_COMMUNITY_CONTAINERS but at least one container was not found.
-It is set to '$AIO_COMMUNITY_CONTAINERS'."
-        exit 1
-    fi
+    print_red "You've set AIO_COMMUNITY_CONTAINERS but the option was removed.
+The community containers get managed via the AIO interface now."
 fi
 
-# Check DNS resolution
-# Prevents issues like https://github.com/nextcloud/all-in-one/discussions/565
-curl https://nextcloud.com &>/dev/null
-if [ "$?" = 6 ]; then
-    print_red "Could not resolve the host nextcloud.com."
-    echo "Most likely the DNS resolving does not work."
-    echo "You should be able to fix this by following https://dockerlabs.collabnix.com/intermediate/networking/Configuring_DNS.html"
-    echo "Apart from that, there has been this: https://github.com/nextcloud/all-in-one/discussions/2065"
-    exit 1
-fi
-
-# Check if auth.docker.io is reachable
+# Check if ghcr.io is reachable
 # Solves issues like https://github.com/nextcloud/all-in-one/discussions/5268
-if ! curl https://auth.docker.io/token 2>&1 | grep -q token; then
-    print_red "Could not reach https://auth.docker.io."
+if ! curl --no-progress-meter https://ghcr.io/v2/ >/dev/null; then
+    print_red "Could not reach https://ghcr.io."
     echo "Most likely is something blocking access to it."
-    echo "You should be able to fix this by using https://github.com/nextcloud/all-in-one/tree/main/manual-install"
+    echo "You should be able to fix this by following https://dockerlabs.collabnix.com/intermediate/networking/Configuring_DNS.html"
+    echo "Another solution is using https://github.com/nextcloud/all-in-one/tree/main/manual-install"
+    echo "See https://github.com/nextcloud/all-in-one/blob/main/manual-install/latest.yml"
     exit 1
 fi
 
@@ -298,6 +287,13 @@ if [ -n "$TZ" ]; then
     echo "The correct timezone can be set in the AIO interface later on!"
     # Disable exit since it seems to be by default set on unraid and we dont want to break these instances
     # exit 1
+fi
+# Check that http proxy or no_proxy variable is not set which AIO does not support
+if [ -n "$HTTP_PROXY" ] || [ -n "$http_proxy" ] || [ -n "$HTTPS_PROXY" ] || [ -n "$https_proxy" ] || [ -n "$NO_PROXY" ] || [ -n "$no_proxy" ]; then
+    print_red "The environmental variable HTTP_PROXY, http_proxy, HTTPS_PROXY, https_proxy, NO_PROXY or no_proxy has been set which is not supported by AIO."
+    echo "If you need this, then you should use https://github.com/nextcloud/all-in-one/tree/main/manual-install"
+    echo "See https://github.com/nextcloud/all-in-one/blob/main/manual-install/latest.yml"
+    exit 1
 fi
 if mountpoint -q /etc/localtime; then
     print_red "/etc/localtime has been mounted into the container which is not allowed because AIO only supports running in the default Etc/UTC timezone!"
@@ -379,6 +375,11 @@ export TZ=Etc/UTC
 # Fix apache startup
 rm -f /var/run/apache2/httpd.pid
 
+# Fix caddy startup
+if [ -d "/mnt/docker-aio-config/caddy/locks" ]; then
+    rm -rf /mnt/docker-aio-config/caddy/locks/*
+fi
+
 # Fix the Caddyfile format
 caddy fmt --overwrite /Caddyfile
 
@@ -386,4 +387,4 @@ caddy fmt --overwrite /Caddyfile
 chmod 777 /root
 
 # Start supervisord
-/usr/bin/supervisord -c /supervisord.conf
+exec /usr/bin/supervisord -c /supervisord.conf

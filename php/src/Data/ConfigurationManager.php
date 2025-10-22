@@ -7,6 +7,8 @@ use AIO\Controller\DockerController;
 
 class ConfigurationManager
 {
+    private array $secrets = [];
+
     public function GetConfig() : array
     {
         if(file_exists(DataConst::GetConfigFile()))
@@ -50,13 +52,15 @@ class ConfigurationManager
         return $config['secrets'][$secretId];
     }
 
-    public function GetSecret(string $secretId) : string {
-        $config = $this->GetConfig();
-        if(!isset($config['secrets'][$secretId])) {
-            $config['secrets'][$secretId] = "";
+    public function GetRegisteredSecret(string $secretId) : string {
+        if ($this->secrets[$secretId]) {
+            return $this->GetAndGenerateSecret($secretId);
         }
+        throw new \Exception("The secret " . $secretId . " was not registered. Please check if it is defined in secrets of containers.json.");
+    }
 
-        return $config['secrets'][$secretId];
+    public function RegisterSecret(string $secretId) : void {
+        $this->secrets[$secretId] = true;
     }
 
     private function DoubleSafeBackupSecret(string $borgBackupPassword) : void {
@@ -75,7 +79,7 @@ class ConfigurationManager
         if (!file_exists(DataConst::GetBackupArchivesList())) {
             return '';
         }
-        
+
         $content = file_get_contents(DataConst::GetBackupArchivesList());
         if ($content === '') {
             return '';
@@ -95,7 +99,7 @@ class ConfigurationManager
         if ($lastBackupTime === "") {
             return '';
         }
-        
+
         return $lastBackupTime;
     }
 
@@ -103,7 +107,7 @@ class ConfigurationManager
         if (!file_exists(DataConst::GetBackupArchivesList())) {
             return [];
         }
-        
+
         $content = file_get_contents(DataConst::GetBackupArchivesList());
         if ($content === '') {
             return [];
@@ -114,7 +118,7 @@ class ConfigurationManager
         foreach($backupLines as $lines) {
             if ($lines !== "") {
                 $backupTimesTemp = explode(',', $lines);
-                $backupTimes[] = $backupTimesTemp[1];     
+                $backupTimes[] = $backupTimesTemp[1];
             }
         }
 
@@ -140,7 +144,7 @@ class ConfigurationManager
         }
     }
 
-    public function isClamavEnabled() : bool {        
+    public function isClamavEnabled() : bool {
         $config = $this->GetConfig();
         if (isset($config['isClamavEnabled']) && $config['isClamavEnabled'] === 1) {
             return true;
@@ -282,11 +286,6 @@ class ConfigurationManager
             $value = 0;
         }
 
-        // Currently only works on x64. See https://github.com/nextcloud/nextcloud-talk-recording/issues/17
-        if (!$this->isx64Platform()) {
-            $value = 0;
-        }
-
         $config = $this->GetConfig();
         $config['isTalkRecordingEnabled'] = $value;
         $this->WriteConfig($config);
@@ -375,7 +374,7 @@ class ConfigurationManager
             $testUrl = $protocol . $domain . ':443';
             curl_setopt($ch, CURLOPT_URL, $testUrl);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10); 
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
             curl_setopt($ch, CURLOPT_TIMEOUT, 10);
             $response = (string)curl_exec($ch);
             # Get rid of trailing \n
@@ -389,7 +388,7 @@ class ConfigurationManager
                 if ($port === '443') {
                     $notice .= " If you should be using Cloudflare, make sure to disable the Cloudflare Proxy feature as it might block the domain validation. Same for any other firewall or service that blocks unencrypted access on port 443.";
                 } else {
-                    error_log('Please follow https://github.com/nextcloud/all-in-one/blob/main/reverse-proxy.md#6-how-to-debug-things in order to debug things!');
+                    error_log('Please follow https://github.com/nextcloud/all-in-one/blob/main/reverse-proxy.md#how-to-debug in order to debug things!');
                 }
                 throw new InvalidSettingConfigurationException($notice);
             }
@@ -474,7 +473,7 @@ class ConfigurationManager
         } elseif ($location !== '' && $repo !== '') {
             throw new InvalidSettingConfigurationException("Location and remote repo url are mutually exclusive!");
         }
-        
+
         if ($location !== '') {
             $isValidPath = false;
             if (str_starts_with($location, '/') && !str_ends_with($location, '/')) {
@@ -484,8 +483,15 @@ class ConfigurationManager
             }
 
             if (!$isValidPath) {
-                throw new InvalidSettingConfigurationException("The path must start with '/', and must not end with '/'!");
+                throw new InvalidSettingConfigurationException("The path must start with '/', and must not end with '/'! Another option is to use the docker volume name 'nextcloud_aio_backupdir'.");
             }
+
+            // Prevent backup to be contained in Nextcloud Datadir as this will delete the backup archive upon restore
+            // See https://github.com/nextcloud/all-in-one/issues/6607
+            if (str_starts_with($location . '/', rtrim($this->GetNextcloudDatadirMount(), '/') . '/')) {
+                throw new InvalidSettingConfigurationException("The path must not be a children of or equal to NEXTCLOUD_DATADIR, which is currently set to " . $this->GetNextcloudDatadirMount());
+            }
+
         } else {
             $this->ValidateBorgRemoteRepo($repo);
         }
@@ -629,7 +635,7 @@ class ConfigurationManager
         if (!file_exists(DataConst::GetBackupPublicKey())) {
             return "";
         }
-        
+
         return trim(file_get_contents(DataConst::GetBackupPublicKey()));
     }
 
@@ -771,7 +777,7 @@ class ConfigurationManager
         if (!preg_match("#^[0-1][0-9]:[0-5][0-9]$#", $time) && !preg_match("#^2[0-3]:[0-5][0-9]$#", $time)) {
             throw new InvalidSettingConfigurationException("You did not enter a correct time! One correct example is '04:00'!");
         }
-        
+
         if ($enableAutomaticUpdates === false) {
             $time .= PHP_EOL . 'automaticUpdatesAreNotEnabled';
         } else {
@@ -1008,14 +1014,59 @@ class ConfigurationManager
     }
 
     private function GetCommunityContainers() : string {
-        $envVariableName = 'AIO_COMMUNITY_CONTAINERS';
-        $configName = 'aio_community_containers';
-        $defaultValue = '';
-        return $this->GetEnvironmentalVariableOrConfig($envVariableName, $configName, $defaultValue);
+        $config = $this->GetConfig();
+        if(!isset($config['aio_community_containers'])) {
+            $config['aio_community_containers'] = '';
+        }
+
+        return $config['aio_community_containers'];
     }
 
-    public function GetEnabledCommunityContainers() : array {
+
+    public function listAvailableCommunityContainers() : array {
+        $cc = [];
+        $dir = scandir(DataConst::GetCommunityContainersDirectory());
+        if ($dir === false) {
+            return $cc;
+        }
+        // Get rid of dots from the scandir command
+        $dir = array_diff($dir, array('..', '.', 'readme.md'));
+        foreach ($dir as $id) {
+            $filePath = DataConst::GetCommunityContainersDirectory() . '/' . $id . '/' . $id . '.json';
+            $fileContents = apcu_fetch($filePath);
+            if (!is_string($fileContents)) {
+                $fileContents = file_get_contents($filePath);
+                if (is_string($fileContents)) {
+                    apcu_add($filePath, $fileContents);
+                }
+            } 
+            $json = is_string($fileContents) ? json_decode($fileContents, true) : false;
+            if(is_array($json) && is_array($json['aio_services_v1'])) {
+                foreach ($json['aio_services_v1'] as $service) {
+                    $documentation = is_string($service['documentation']) ? $service['documentation'] : '';
+                    if (is_string($service['display_name'])) {
+                        $cc[$id] = [ 
+                            'id' => $id,
+                            'name' => $service['display_name'],
+                            'documentation' => $documentation
+                        ];
+                    }
+                    break;
+                }
+            }
+        }
+        return $cc;
+    }
+
+    /** @return list<string> */
+    public function GetEnabledCommunityContainers(): array {
         return explode(' ', $this->GetCommunityContainers());
+    }
+
+    public function SetEnabledCommunityContainers(array $enabledCommunityContainers) : void {
+        $config = $this->GetConfig();
+        $config['aio_community_containers'] = implode(' ', $enabledCommunityContainers);
+        $this->WriteConfig($config);
     }
 
     private function GetEnabledDriDevice() : string {

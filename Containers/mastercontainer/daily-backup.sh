@@ -2,6 +2,13 @@
 
 echo "Daily backup script has started"
 
+# Check if initial configuration has been done, otherwise this script should do nothing.
+CONFIG_FILE=/mnt/docker-aio-config/data/configuration.json
+if ! [ -f "$CONFIG_FILE" ] || ! grep -q "wasStartButtonClicked.*1" "$CONFIG_FILE"; then
+    echo "Initial configuration via AIO interface not done yet. Exiting..."
+    exit 0
+fi
+
 # Daily backup and backup check cannot be run at the same time
 if [ "$DAILY_BACKUP" = 1 ] && [ "$CHECK_BACKUP" = 1 ]; then
     echo "Daily backup and backup check cannot be run at the same time. Exiting..."
@@ -20,6 +27,11 @@ APACHE_PORT="$(docker inspect nextcloud-aio-apache --format "{{.Config.Env}}" | 
 if [ -z "$APACHE_PORT" ]; then
     echo "APACHE_PORT is not set which is not expected..."
 else
+    # Connect mastercontainer to nextcloud-aio network to make sure that nextcloud-aio-apache is reachable
+    # Prevent issues like https://github.com/nextcloud/all-in-one/discussions/5222
+    docker network connect nextcloud-aio nextcloud-aio-mastercontainer &>/dev/null
+
+    # Wait for apache to start
     while docker ps --format "{{.Names}}" | grep -q "^nextcloud-aio-apache$" && ! nc -z nextcloud-aio-apache "$APACHE_PORT"; do
         echo "Waiting for apache to become available"
         sleep 30
@@ -50,6 +62,12 @@ if [ "$AUTOMATIC_UPDATES" = 1 ]; then
         echo "Waiting for watchtower to stop"
         sleep 30
     done
+fi
+
+# Update container images to reduce downtime later on
+if [ "$AUTOMATIC_UPDATES" = 1 ]; then
+    echo "Updating container images..."
+    sudo -u www-data php /var/www/docker-aio/php/src/Cron/PullContainerImages.php
 fi
 
 # Stop containers if required

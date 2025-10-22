@@ -1,12 +1,13 @@
 # syntax=docker/dockerfile:latest
-FROM nats:2.11.0-scratch AS nats
-FROM eturnal/eturnal:1.12.1 AS eturnal
-FROM strukturag/nextcloud-spreed-signaling:2.0.2 AS signaling
-FROM alpine:3.21.3 AS janus
+FROM nats:2.12.1-scratch AS nats
+FROM eturnal/eturnal:1.12.2-alpine AS eturnal
+FROM strukturag/nextcloud-spreed-signaling:2.0.4 AS signaling
+FROM alpine:3.22.2 AS janus
 
-ARG JANUS_VERSION=v1.3.1
+ARG JANUS_VERSION=v1.3.3
 WORKDIR /src
 RUN set -ex; \
+    apk upgrade --no-cache -a; \
     apk add --no-cache \
         ca-certificates \
         git \
@@ -34,8 +35,9 @@ RUN set -ex; \
     make configs; \
     rename -v ".jcfg.sample" ".jcfg" /usr/local/etc/janus/*.jcfg.sample
 
-FROM alpine:3.21.3
+FROM alpine:3.22.2
 ENV ETURNAL_ETC_DIR="/conf"
+ENV SKIP_CERT_VERIFY=false
 COPY --from=janus     --chmod=777 --chown=1000:1000 /usr/local                          /usr/local
 COPY --from=eturnal   --chmod=777 --chown=1000:1000 /opt/eturnal                        /opt/eturnal
 COPY --from=nats      --chmod=777 --chown=1000:1000 /nats-server                        /usr/local/bin/nats-server
@@ -104,4 +106,5 @@ ENTRYPOINT ["/start.sh"]
 CMD ["supervisord", "-c", "/supervisord.conf"]
 
 HEALTHCHECK CMD /healthcheck.sh
-LABEL com.centurylinklabs.watchtower.enable="false"
+LABEL com.centurylinklabs.watchtower.enable="false" \
+    org.label-schema.vendor="Nextcloud"

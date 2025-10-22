@@ -95,9 +95,10 @@ backends = backend-1
 allowall = false
 timeout = 10
 connectionsperhost = 8
+skipverify = ${SKIP_CERT_VERIFY}
 
 [backend-1]
-url = https://${NC_DOMAIN}
+urls = https://${NC_DOMAIN}
 secret = ${SIGNALING_SECRET}
 maxstreambitrate = ${TALK_MAX_STREAM_BITRATE}
 maxscreenbitrate = ${TALK_MAX_SCREEN_BITRATE}

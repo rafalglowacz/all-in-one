@@ -82,6 +82,12 @@ $app->get('/containers', function (Request $request, Response $response, array $
     $dockerController = $container->get(\AIO\Controller\DockerController::class);
     $dockerActionManger->ConnectMasterContainerToNetwork();
     $dockerController->StartDomaincheckContainer();
+
+    // Check if bypass_mastercontainer_update is provided on the URL, a special developer mode to bypass a mastercontainer update and use local image.
+    $params = $request->getQueryParams();
+    $bypass_mastercontainer_update = isset($params['bypass_mastercontainer_update']);
+    $bypass_container_update = isset($params['bypass_container_update']);
+
     return $view->render($response, 'containers.twig', [
         'domain' => $configurationManager->GetDomain(),
         'apache_port' => $configurationManager->GetApachePort(),
@@ -91,7 +97,7 @@ $app->get('/containers', function (Request $request, Response $response, array $
         'nextcloud_password' => $configurationManager->GetAndGenerateSecret('NEXTCLOUD_PASSWORD'),
         'containers' => (new \AIO\ContainerDefinitionFetcher($container->get(\AIO\Data\ConfigurationManager::class), $container))->FetchDefinition(),
         'borgbackup_password' => $configurationManager->GetAndGenerateSecret('BORGBACKUP_PASSWORD'),
-        'is_mastercontainer_update_available' => $dockerActionManger->IsMastercontainerUpdateAvailable(),
+        'is_mastercontainer_update_available' => ( $bypass_mastercontainer_update ? false : $dockerActionManger->IsMastercontainerUpdateAvailable() ),
         'has_backup_run_once' => $configurationManager->hasBackupRunOnce(),
         'is_backup_container_running' => $dockerActionManger->isBackupContainerRunning(),
         'backup_exit_code' => $dockerActionManger->GetBackupcontainerExitCode(),
@@ -128,7 +134,10 @@ $app->get('/containers', function (Request $request, Response $response, array $
         'is_nvidia_gpu_enabled' => $configurationManager->isNvidiaGpuEnabled(),
         'is_talk_recording_enabled' => $configurationManager->isTalkRecordingEnabled(),
         'is_docker_socket_proxy_enabled' => $configurationManager->isDockerSocketProxyEnabled(),
-        'is_whiteboard_enabled' => $configurationManager->isWhiteboardEnabled(),        
+        'is_whiteboard_enabled' => $configurationManager->isWhiteboardEnabled(),
+        'community_containers' => $configurationManager->listAvailableCommunityContainers(),
+        'community_containers_enabled' => $configurationManager->GetEnabledCommunityContainers(),
+        'bypass_container_update' => $bypass_container_update,
     ]);
 })->setName('profile');
 $app->get('/login', function (Request $request, Response $response, array $args) use ($container) {

@@ -1,12 +1,11 @@
 # syntax=docker/dockerfile:latest
-# From https://github.com/containrrr/watchtower/blob/main/dockerfiles/Dockerfile.self-contained
-FROM containrrr/watchtower:1.7.1 AS watchtower
+FROM ghcr.io/nicholas-fedor/watchtower:1.12.1 AS watchtower
 
-FROM alpine:3.21.3
+FROM alpine:3.22.2
 
 RUN set -ex; \
     apk upgrade --no-cache -a; \
-    apk add --no-cache bash
+    apk add --no-cache bash ca-certificates tzdata
 
 COPY --from=watchtower /watchtower /watchtower
 
@@ -16,4 +15,5 @@ COPY --chmod=775 start.sh /start.sh
 USER root
 
 ENTRYPOINT ["/start.sh"]
-LABEL com.centurylinklabs.watchtower.enable="false"
+LABEL com.centurylinklabs.watchtower.enable="false" \
+    org.label-schema.vendor="Nextcloud"

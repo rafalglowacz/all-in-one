@@ -17,13 +17,16 @@
 
     <div class="container">
         <main>
-            <h1>Nextcloud AIO v10.9.0</h1>
+            <h1>Nextcloud AIO v11.10.0</h1>
 
             {# Add 2nd tab warning #}
             <script type="text/javascript" src="second-tab-warning.js"></script>
 
             {# timezone-prefill #}
             <script type="text/javascript" src="timezone.js"></script>
+
+            {# js for optional containers and additional containers forms #}
+            <script type="text/javascript" src="containers-form-submit.js?v4"></script>
 
             {% set hasBackupLocation = borg_backup_host_location or borg_remote_repo %}
             {% set isAnyRunning = false %}
@@ -33,7 +36,7 @@
             {% set isBackupOrRestoreRunning = false %}
             {% set isApacheStarting = false %}
             {# Setting newMajorVersion to '' will hide corresponding options/elements, can be set to an integer like 26 in order to show corresponding elements. If set, also increase installLatestMajor in https://github.com/nextcloud/all-in-one/blob/main/php/src/Controller/DockerController.php #}
-            {% set newMajorVersion = 31 %}
+            {% set newMajorVersionString = '25 Autumn' %}
 
             {% if is_backup_container_running == true %}
                 {% if borg_backup_mode == 'backup' or borg_backup_mode == 'restore' %}
@@ -60,7 +63,7 @@
             {% endfor %}
 
             {% if is_daily_backup_running == true %}
-                <p><span class="status running"></span> Daily backup currently running. (<a href="/api/docker/logs?id=nextcloud-aio-mastercontainer" target="_blank">Logs</a>)</p>
+                <p><span class="status running"></span> Daily backup currently running. (<a href="/api/docker/logs?id=nextcloud-aio-mastercontainer" target="_blank">Mastercontainer logs</a>) (<a href="/api/docker/logs?id=nextcloud-aio-borgbackup" target="_blank">Borg backup container logs</a>)</p>
                 {% if automatic_updates == true %}
                     <p>This will update your containers, the mastercontainer and, on Saturdays, your Nextcloud apps if the backup is successful.</p>
                     {% if is_mastercontainer_update_available == true %}
@@ -101,7 +104,7 @@
                             {% else %}
                                 <p>AIO is currently in "reverse proxy mode" which means that it can be installed behind a web server or reverse proxy (like Apache, Nginx, Caddy, Cloudflare Tunnel and else) and does not do the TLS proxying itself.</p>
                             {% endif %}
-                            <p>Please type the domain that will be used for Nextcloud.</p>
+                            <p>Please type in the domain that will be used for Nextcloud and submit it.</p>
                             {% if skip_domain_validation == true %}
                                 <p><strong>Please note:</strong> The domain validation is disabled so any domain will be accepted here! Make sure you do not make a typo here as you will not be able to change it afterwards!</p>
                             {% endif %}
@@ -115,12 +118,12 @@
                                 <p>Make sure that this server is reachable on port 443 (port 443/tcp is open/forwarded in your firewall/router and 443/udp as well if you want to enable http3) and that you've correctly set up the DNS config for the domain that you enter (set the A record to your public ipv4-address and if you need ipv6, set the AAAA record to your public ipv6-address. A CNAME record is, of course, also possible). You should see hints on what went wrong in the top right corner if your domain is not accepted.</p>
                                 <details>
                                     <summary>Click here for further hints</summary>
-                                    <p>If you do not have a domain yet, you can get one for free e.g. from duckdns.org and others. Recommended is to use <a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/5439">Tailscale</a></p>
+                                    <p>If you do not have a domain yet, you can get one for free e.g. from duckdns.org and others. Recommended is to use <a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/6817">Tailscale</a></p>
                                     <p>If you have a dynamic public IP-address, you can use e.g. <a target="_blank" href="https://ddclient.net/">DDclient</a> with a compatible domain provider for DNS updates.</p>
                                     <p>If you only want to install AIO locally without exposing it to the public internet or if you cannot do so, feel free to follow <a target="_blank" href="https://github.com/nextcloud/all-in-one/blob/main/local-instance.md">this documentation</a>.</p>
                                     <p>If you should be using Cloudflare Proxy for your domain, make sure to disable the Proxy feature temporarily as it might block the domain validation attempts.</p>
                                     {% if apache_port != '443' %}
-                                        <p>If you run into issues with your domain being accepted, see <a target="_blank" href="https://github.com/nextcloud/all-in-one/blob/main/reverse-proxy.md#6-how-to-debug-things">these steps</a> for how to debug things.</p>
+                                        <p>If you run into issues with your domain being accepted, see <a target="_blank" href="https://github.com/nextcloud/all-in-one/blob/main/reverse-proxy.md#how-to-debug">these steps</a> for how to debug things.</p>
                                     {% endif %}
                                     <p><strong>Hint:</strong> If the domain validation fails but you are completely sure that you've configured everything correctly, you may skip the domain validation by following <a target="_blank" href="https://github.com/nextcloud/all-in-one#how-to-skip-the-domain-validation">this documentation</a>.</p>
                                 </details>
@@ -160,7 +163,7 @@
                                             </form>
                                         {% endif %}
                                         <p>Choose the backup that you want to restore and click on the button below to restore the selected backup. This will restore the whole AIO instance. Please note that the current AIO passphrase will be kept and the previous AIO passphrase will not be restored from backup!</p>
-                                        <p><strong>Please note:</strong> If the backup that you want to restore contained any <a target="_blank" href="https://github.com/nextcloud/all-in-one/tree/main/community-containers#community-containers">community container</a>, but you did not specify the same community containers via environmental variable while creating this new AIO instance, you need to restore the same backup a second time after this attempt so that the community container data is also correctly restored.</p>
+                                        <p><strong>Important:</strong> If the backup that you want to restore contained any <a target="_blank" href="https://github.com/nextcloud/all-in-one/tree/main/community-containers#community-containers">community container</a>, you need to restore the same backup a second time after this attempt so that the community container data is also correctly restored.</p>
                                         <form method="POST" action="/api/docker/restore" class="xhr" id="restore_selection">
                                             <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
                                             <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
@@ -170,7 +173,7 @@
                                                 {% endfor %}
                                             </select><br>
                                             <input type="checkbox" id="restore-exclude-previews" name="restore-exclude-previews"><label for="restore-exclude-previews">Exclude previews from restore which will speed up the restore process but will trigger a scan of the preview folder as soon as the Nextcloud container starts the next time</label><br>
-                                            <input type="submit" value="Restore selected backup"/>
+                                            <input type="submit" value="Restore selected backup" onclick="return confirm('⚠️ Important: If the backup that you want to restore contained any community container, you need to restore the same backup a second time after this attempt so that the community container data is also correctly restored.')"/>
                                         </form>
                                     {% endif %}
                                 {% elseif borg_backup_mode == 'restore' %}
@@ -192,7 +195,7 @@
                                 <p>
                                 Please enter the location of the backup archive on your host or a
                                 <a target="_blank" href="https://borgbackup.readthedocs.io/en/stable/usage/general.html#repository-urls">remote borg repo url</a>
-                                if stored remotely; and the encryption password of the backup archive below:
+                                if stored remotely; and the encryption password of the backup archive below and submit all values:
                                 </p>
                                 <form method="POST" action="/api/configuration" class="xhr">
                                     <label>Local backup location</label> <input type="text" id="borg_restore_host_location" name="borg_restore_host_location" value="{{borg_backup_host_location}}" placeholder="/mnt/backup"/><br>
@@ -287,10 +290,10 @@
                         {% else %}
                             {% if is_mastercontainer_update_available == false %}
                                 <p>Your containers are up-to-date.</p>
-                                {% if newMajorVersion != '' and isAnyRunning == true and isApacheStarting != true %}
+                                {% if newMajorVersionString != '' and isAnyRunning == true and isApacheStarting != true %}
                                     <details>
-                                    <summary>Note about <strong>Nextcloud Hub {{ newMajorVersion - 21 }}</strong></summary>
-                                        <p>If you haven't upgraded to Nextcloud Hub {{ newMajorVersion - 21 }} yet and want to do that now, feel free to follow <strong><a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/6053">this documentation</a></strong></p>
+                                    <summary>Note about <strong>Nextcloud Hub {{ newMajorVersionString }}</strong></summary>
+                                        <p>If you haven't upgraded to Nextcloud Hub {{ newMajorVersionString }} yet and want to do that now, feel free to follow <strong><a target="_blank" href="https://github.com/nextcloud/all-in-one/discussions/6865">this documentation</a></strong></p>
                                     </details>
                                 {% endif %}
                             {% endif %}
@@ -334,8 +337,8 @@
                                     <form method="POST" action="/api/docker/start" class="xhr">
                                         <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
                                         <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-                                        {% if newMajorVersion != '' %}
-                                            <input type="checkbox" id="install_latest_major" name="install_latest_major"><label for="install_latest_major">Install Nextcloud Hub {{ newMajorVersion - 21 }} (if unchecked, Nextcloud Hub {{ newMajorVersion - 22 }} will get installed)</label><br>
+                                        {% if newMajorVersionString != '' %}
+                                            <input type="checkbox" id="install_latest_major" name="install_latest_major"><label for="install_latest_major">Install Nextcloud Hub {{ newMajorVersionString }} (if unchecked, Nextcloud Hub 10 will get installed)</label><br>
                                         {% endif %}
                                         <input type="submit" value="Download and start containers" />
                                     </form>
@@ -349,6 +352,9 @@
                                     <form method="POST" action="/api/docker/start" class="xhr">
                                         <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
                                         <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
+                                        {% if bypass_container_update == true %}
+                                            <input type="hidden" name="bypass_container_update" value="{{bypass_container_update}}">
+                                        {% endif %}
                                         <input class="button " type="submit" value="Start and update containers" onclick="return confirm('Start and update containers? You should consider creating a backup first.')" />
                                     </form>
                                 {% endif %}
@@ -364,10 +370,11 @@
                         {% else %}
                             {% if is_backup_container_running == false and not hasBackupLocation and isApacheStarting != true %}
                                 <h2>Backup and restore</h2>
-                                <p>Please enter the directory path below where backups will be created on the host system. It's best to choose a location on a separate drive and not on your root drive.</p>
+                                <p>Please enter the directory path below where backups will be created on the host system and submit it. It's best to choose a location on a separate drive and not on your root drive.</p>
                                 <p>
                                 To store backups remotely instead, fill in the
-                                <a target="_blank" href="https://borgbackup.readthedocs.io/en/stable/usage/general.html#repository-urls">remote borg repo url</a>.
+                                <a target="_blank" href="https://borgbackup.readthedocs.io/en/stable/usage/general.html#repository-urls">remote borg repo url and submit it</a>.
+                                You will be provided with an SSH public key for authorization at the remote afterwards.
                                 </p>
                                 <form method="POST" action="/api/configuration" class="xhr">
                                     <label>Local backup location</label> <input type="text" id="borg_backup_host_location" name="borg_backup_host_location" placeholder="/mnt/backup"/><br>
@@ -507,12 +514,12 @@
 
                                             <h3>Daily backup and automatic updates</h3>
                                             {% if daily_backup_time == "" %}
-                                                <p>By entering a time below, you can enable daily backups. It will create them at the entered time in 24h format. E.g. <strong>04:00</strong> will create backups at 4 am UTC and <strong>16:00</strong> at 4 pm UTC. When creating the backup, containers will be stopped and restarted after the backup is complete.</p>
+                                                <p>By entering a time below and submitting it, you can enable daily backups. It will create them at the entered time in 24h format. E.g. <strong>04:00</strong> will create backups at 4 am UTC and <strong>16:00</strong> at 4 pm UTC. When creating the backup, containers will be stopped and restarted after the backup is complete.</p>
                                                 <form method="POST" action="/api/configuration" class="xhr">
-                                                    <input type="text" name="daily_backup_time" value="04:00" placeholder="04:00"/>
+                                                    <input type="text" name="daily_backup_time" placeholder="04:00"/>
                                                     <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
                                                     <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-                                                    <input type="submit" value="Submit backup time" /><br>
+                                                    <input type="submit" value="Submit daily backup time and settings" /><br>
                                                     <input type="checkbox" id="automatic_updates" name="automatic_updates" checked="checked"><label for="automatic_updates">Automatically update all containers, the mastercontainer and on saturdays your Nextcloud apps</label><br>
                                                     <input type="checkbox" id="success_notification" name="success_notification" checked="checked"><label for="success_notification">Send notifications about successful backups (notifications about unsuccessful backups will always be sent)</label>
                                                 </form>
@@ -526,12 +533,12 @@
                                                     <input type="hidden" name="delete_daily_backup_time" value="yes"/>
                                                     <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
                                                     <input type="hidden" name="{{csrf.keys.value}}" value="{{csrf.value}}">
-                                                    <input type="submit" value="Disable or change daily backups" />
+                                                    <input type="submit" value="Disable or change daily backup settings" />
                                                 </form>
                                             {% endif %}
 
                                             <h3>Back up additional directories and docker volumes of your host</h3>
-                                            <p>Below you can enter directories and docker volumes of your host that will be backed up into the same borg backup archive.</p>
+                                            <p>Below you can enter directories and docker volumes of your host that will be backed up into the same borg backup archive. Make sure to press the submit button after changing anything.</p>
                                             <form method="POST" action="/api/configuration" class="xhr">
                                                 <textarea id="additional_backup_directories" name="additional_backup_directories" rows="4" cols="50" placeholder="/directory/on/the/host&#10;my_custom_docker_volume">{{ additional_backup_directories }}</textarea>
                                                 <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
@@ -584,7 +591,7 @@
                         {% else %}
                             {% if timezone == "" %}
                                 <p>To get the correct time values for certain Nextcloud features, set the timezone for Nextcloud to the one that your users mainly use. Please note that this setting does not apply to the mastercontainer and any backup option.</p>
-                                <p>You can configure the timezone for Nextcloud below:</p>
+                                <p>You can configure the timezone for Nextcloud below (Do not forget to submit the value!):</p>
                                 <form method="POST" action="/api/configuration" class="xhr">
                                     <input type="text" id="timezone" name="timezone" placeholder="Europe/Berlin" />
                                     <input type="hidden" name="{{csrf.keys.name}}" value="{{csrf.name}}">
@@ -602,6 +609,7 @@
                                 </form>
                             {% endif %}
                         {% endif %}
+                        {{ include('includes/community-containers.twig') }}
                     {% endif %}
                 {% endif %}
             {% endif %}
